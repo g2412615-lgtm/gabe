@@ -1,0 +1,9 @@
+name = "froi-draft"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# Secret (never in this file):
+#   npx wrangler secret put ANTHROPIC_API_KEY
+# Deploy:
+#   npx wrangler deploy
+# Then paste the printed URL + "/draft" into config.js DRAFT_ENDPOINT.

@@ -1,0 +1,14 @@
+{
+  "name": "froi-builder",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FROI Report Builder — BEST / Shell Energy Stadium (static site + Cloudflare Worker)",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/fill_test.mjs",
+    "serve": "npx --yes serve@14 -l 8788 ."
+  },
+  "devDependencies": {
+    "pdf-lib": "1.17.1"
+  }
+}
