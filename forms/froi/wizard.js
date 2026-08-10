@@ -330,6 +330,19 @@ export function extraBlanks(state) {
   const a = state.answers || {};
   const out = [];
   if (!a.w1_name && !a.w2_name) out.push('Witness names/contact (confirm there were none)');
+  for (const n of [1, 2]) {
+    if (!a[`w${n}_name`]) continue;
+    const missing = ['phone', 'address', 'cityST', 'zip'].filter((f) => !String(a[`w${n}_${f}`] || '').trim());
+    if (missing.length) out.push(`Witness ${n} contact details (${missing.length === 4 ? 'all' : missing.join('/')})`);
+    const types = Array.isArray(a[`w${n}_type`]) ? a[`w${n}_type`] : [];
+    if (types.includes('Other') && !String(a[`w${n}_typeOther`] || '').trim()) out.push(`Witness ${n} "Other" description`);
+  }
   if (!state.incidentType) out.push('Type of incident (page 3)');
+  else if (state.incidentType === 'Other' && !String(state.incidentTypeOther || '').trim()) {
+    out.push('Incident type "Other" description (page 3)');
+  }
+  if (Array.isArray(a.docs) && a.docs.includes('Other') && !String(a.docsOther || '').trim()) {
+    out.push('Documentation "Other" description');
+  }
   return out;
 }

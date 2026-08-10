@@ -74,12 +74,27 @@ const openSections = {};
 const templateBytesCache = {};
 let saveTimer = null;
 
+// Draft-request ownership: a response may only touch state if no reset
+// happened while it was in flight — otherwise a slow response could write the
+// PREVIOUS report's narrative (another claimant's details) into a fresh one.
+let draftEpoch = 0;
+let draftController = null;
+
+function cancelDraft() {
+  draftEpoch++;
+  if (draftController) {
+    draftController.abort();
+    draftController = null;
+  }
+}
+
 function todayISO() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function resetState(formId) {
+  cancelDraft();
   store.formId = formId;
   store.step = 0;
   store.answers = {};
@@ -210,11 +225,19 @@ function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-// A <details> that remembers its open state across re-renders.
+// A <details> that remembers the USER's open/closed choice across re-renders.
+// The initial programmatic `open` assignment queues a native toggle event too;
+// tracking the expected state keeps that from being recorded as a user choice
+// (which would pin a computed default forever).
 function detailsSection(key, defaultOpen, attrs, ...children) {
   const open = key in openSections ? openSections[key] : defaultOpen;
   const el = h('details', { ...attrs, open }, ...children);
-  el.addEventListener('toggle', () => { openSections[key] = el.open; });
+  let expected = open;
+  el.addEventListener('toggle', () => {
+    if (el.open === expected) return; // programmatic — not a user choice
+    expected = el.open;
+    openSections[key] = el.open;
+  });
   return el;
 }
 
@@ -491,9 +514,11 @@ function maybeDraft() {
 }
 
 async function callDraft(key, { overwrite = false } = {}) {
+  const epoch = draftEpoch;
   store.ai = { status: 'loading', data: store.ai.data, error: null, key };
   render({ keepScroll: true });
   const controller = new AbortController();
+  draftController = controller;
   const timeout = setTimeout(() => controller.abort(), 60000);
   try {
     const res = await fetch(DRAFT_ENDPOINT, {
@@ -504,6 +529,7 @@ async function callDraft(key, { overwrite = false } = {}) {
     });
     if (!res.ok) throw new Error(`draft endpoint returned ${res.status}`);
     const data = await res.json();
+    if (epoch !== draftEpoch) return; // a reset happened mid-flight — this response belongs to a dead report
     for (const k of FORM.RESPONSE_KEYS) {
       if (!(k in data)) throw new Error(`draft response missing ${k}`);
     }
@@ -515,11 +541,23 @@ async function callDraft(key, { overwrite = false } = {}) {
     store.ai = { status: 'done', data, error: null, key };
     saveDraft();
   } catch (e) {
-    store.ai = { status: 'error', data: store.ai.data, error: e.name === 'AbortError' ? 'timed out' : String(e.message || e), key: '' };
+    if (epoch !== draftEpoch) return;
+    // A confirmed replace-all keeps its intent across the failure so Retry
+    // still delivers the replacement the filer already agreed to.
+    store.ai = {
+      status: 'error', data: store.ai.data,
+      error: e.name === 'AbortError' ? 'timed out' : String(e.message || e),
+      key: '', overwritePending: overwrite,
+    };
   } finally {
     clearTimeout(timeout);
-    if (store.screen === 'review') render({ keepScroll: true });
+    if (draftController === controller) draftController = null;
+    if (epoch === draftEpoch && store.screen === 'review') render({ keepScroll: true });
   }
+}
+
+function retryDraft() {
+  callDraft(draftRequestKey(), { overwrite: store.ai.overwritePending === true });
 }
 
 function redraft() {
@@ -616,7 +654,7 @@ function renderReview() {
       ai.error === 'no-endpoint'
         ? 'AI drafting is not configured — write the narrative by hand below. Your raw notes are underneath for reference.'
         : `AI drafting is unavailable (${ai.error}) — write the narrative by hand below, or retry.`,
-      DRAFT_ENDPOINT && h('button', { class: 'btn ghost small', onclick: () => callDraft(draftRequestKey()) }, 'Retry AI draft'),
+      DRAFT_ENDPOINT && h('button', { class: 'btn ghost small', onclick: retryDraft }, 'Retry AI draft'),
     ),
     (manual || !loading) && a.notes && detailsSection('rev:rawnotes', manual, { class: 'section' },
       h('summary', {}, 'Your raw notes (reference)'),
@@ -711,10 +749,12 @@ function renderReview() {
           h('input', {
             type: 'text', inputmode: 'numeric', placeholder: 'How many days?', value: a.missedDaysCount || '',
             oninput: (e) => setAnswer('missedDaysCount', e.target.value),
+            onchange: () => render({ keepScroll: true }), // refresh summary + blanks once typing settles
           }),
           h('input', {
             type: 'date', value: a.returnDate || '', 'aria-label': 'Return-to-work date',
             oninput: (e) => setAnswer('returnDate', e.target.value),
+            onchange: () => render({ keepScroll: true }),
           }),
         ),
       ),
