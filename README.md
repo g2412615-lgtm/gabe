@@ -92,5 +92,13 @@ npm run serve     # http://localhost:8788
 ## Adding future forms
 
 `index.html` renders the registry in `config.js` (`FORM_REGISTRY`). Adding a
-form = a new `forms/<id>/` folder with `template.pdf`, `fieldmap.js`,
-`rulebook.js`, `wizard.js` + a registry entry — the wizard engine is generic.
+form = a new `forms/<id>/` folder + a registry entry — no engine changes. The
+engine dynamically imports `forms/<id>/wizard.js` and `forms/<id>/fieldmap.js`
+and fetches `forms/<id>/template.pdf`. A form folder must export:
+
+- `wizard.js` — `WIZARD_STEPS`, `REVIEW_SECTIONS`, `FOLLOW_UP_FIELDS`,
+  `extraBlanks(state)`
+- `fieldmap.js` — `OPTIONS`, `buildFill(state)`, `fillFroi(pdfLib, bytes, fill)`,
+  `buildFacts(answers)`, `NARRATIVE_KEYS`, `RESPONSE_KEYS`,
+  `outputFilename(answers, todayIso)`, `isoToMDY`, `to12Hour`
+- `rulebook.js` — `RULEBOOK` (imported by the Worker)

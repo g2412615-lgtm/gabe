@@ -1,19 +1,45 @@
 // app.js — wizard engine, state, review screen, PDF generation.
-// The engine is generic: steps/fields/conditions come from forms/<id>/wizard.js
-// data; everything form-specific lives in the per-form config modules.
+// The engine is generic: everything form-specific (steps, field map, fill
+// mapping, AI facts payload, narrative contract) is loaded dynamically from
+// forms/<id>/wizard.js + forms/<id>/fieldmap.js based on the registry entry,
+// so adding a form is a new folder + a registry entry — no engine changes.
 
 import {
   DRAFT_ENDPOINT, DEFAULTS, FORM_REGISTRY, SUBMIT_EMAIL, SUBMIT_DEADLINE,
 } from './config.js';
-import {
-  WIZARD_STEPS, REVIEW_SECTIONS, FOLLOW_UP_FIELDS,
-} from './forms/froi/wizard.js';
-import {
-  OPTIONS, buildFill, fillFroi, isoToMDY, to12Hour,
-} from './forms/froi/fieldmap.js';
 
-const DRAFT_KEY = 'froi.draft.v1';
-const TEMPLATE_URL = 'forms/froi/template.pdf';
+// ---------------------------------------------------------------------------
+// Per-form module loading
+// ---------------------------------------------------------------------------
+
+const formCache = {};
+let FORM = null; // the active form's merged module exports + metadata
+
+async function loadForm(id) {
+  if (!formCache[id]) {
+    const [wizard, fieldmap] = await Promise.all([
+      import(`./forms/${id}/wizard.js`),
+      import(`./forms/${id}/fieldmap.js`),
+    ]);
+    const fieldIdx = {};
+    for (const step of wizard.WIZARD_STEPS) {
+      for (const f of allStepFields(step)) fieldIdx[f.id] = f;
+    }
+    formCache[id] = {
+      id,
+      ...wizard,
+      ...fieldmap,
+      fieldIdx,
+      templateUrl: `forms/${id}/template.pdf`,
+      draftKey: `${id}.draft.v1`,
+    };
+  }
+  return formCache[id];
+}
+
+function allStepFields(step) {
+  return [...(step.fields || []), ...(step.sections || []).flatMap((s) => s.fields)];
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -25,6 +51,7 @@ const emptyNarratives = () => ({
 
 const store = {
   screen: 'landing', // landing | wizard | review | done
+  formId: null,
   step: 0,
   answers: {},
   narratives: emptyNarratives(),
@@ -38,7 +65,13 @@ const store = {
   savedAt: null,
 };
 
-let templateBytesCache = null;
+// Answers that back a required confirmation: changing them un-confirms.
+const CONFIRMATION_ANSWERS = { beyondFirstAid: 'firstAid', missedDays: 'missedDays' };
+
+// Remembered open/closed state for <details> sections across re-renders.
+const openSections = {};
+
+const templateBytesCache = {};
 let saveTimer = null;
 
 function todayISO() {
@@ -46,50 +79,8 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function saveDraft() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    store.savedAt = new Date().toISOString();
-    const { screen, step, answers, narratives, defaults, classification, incidentType, incidentTypeOther, confirmed, savedAt } = store;
-    try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({
-        version: 1, screen, step, answers, narratives, defaults, classification, incidentType, incidentTypeOther, confirmed, savedAt,
-      }));
-    } catch { /* storage full/blocked — keep working in memory */ }
-    const el = document.getElementById('save-indicator');
-    if (el) el.textContent = 'Draft saved';
-  }, 250);
-}
-
-function loadDraft() {
-  try {
-    const raw = localStorage.getItem(DRAFT_KEY);
-    if (!raw) return null;
-    const d = JSON.parse(raw);
-    return d && d.version === 1 ? d : null;
-  } catch { return null; }
-}
-
-function resumeDraft(d) {
-  store.step = Math.min(d.step || 0, WIZARD_STEPS.length - 1);
-  store.answers = d.answers || {};
-  store.narratives = { ...emptyNarratives(), ...(d.narratives || {}) };
-  store.defaults = { ...DEFAULTS, ...(d.defaults || {}) };
-  store.classification = d.classification || '';
-  store.incidentType = d.incidentType || '';
-  store.incidentTypeOther = d.incidentTypeOther || '';
-  store.confirmed = { classification: false, firstAid: false, missedDays: false, ...(d.confirmed || {}) };
-  store.savedAt = d.savedAt || null;
-  applyWizardDefaults();
-  store.screen = d.screen === 'review' ? 'review' : 'wizard';
-  if (store.screen === 'review') maybeDraft();
-  render();
-}
-
-function clearDraft() {
-  if (!window.confirm('Delete this draft from the device? Drafts contain personal information — clear them once the report is filed.')) return;
-  try { localStorage.removeItem(DRAFT_KEY); } catch {}
-  store.screen = 'landing';
+function resetState(formId) {
+  store.formId = formId;
   store.step = 0;
   store.answers = {};
   store.narratives = emptyNarratives();
@@ -99,32 +90,101 @@ function clearDraft() {
   store.incidentTypeOther = '';
   store.confirmed = { classification: false, firstAid: false, missedDays: false };
   store.ai = { status: 'idle', data: null, error: null, key: '' };
+  if (store.generated?.url) URL.revokeObjectURL(store.generated.url);
   store.generated = null;
   store.savedAt = null;
+  for (const k of Object.keys(openSections)) delete openSections[k];
+}
+
+function saveDraft() {
+  if (!FORM) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    store.savedAt = new Date().toISOString();
+    const { formId, screen, step, answers, narratives, defaults, classification, incidentType, incidentTypeOther, confirmed, savedAt } = store;
+    let saved = false;
+    try {
+      localStorage.setItem(FORM.draftKey, JSON.stringify({
+        version: 1, formId, screen, step, answers, narratives, defaults, classification, incidentType, incidentTypeOther, confirmed, savedAt,
+      }));
+      saved = true;
+    } catch { /* storage full or blocked — keep working in memory */ }
+    const el = document.getElementById('save-indicator');
+    if (el) {
+      el.textContent = saved ? 'Draft saved' : 'NOT saved — storage unavailable';
+      el.classList.toggle('save-failed', !saved);
+    }
+  }, 250);
+}
+
+function loadDraftFor(id) {
+  try {
+    const raw = localStorage.getItem(`${id}.draft.v1`);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    return d && d.version === 1 ? d : null;
+  } catch { return null; }
+}
+
+async function resumeForm(entry, draft) {
+  try {
+    FORM = await loadForm(entry.id);
+  } catch (e) {
+    window.alert(`Could not load the ${entry.label} form: ${e.message || e}`);
+    return;
+  }
+  resetState(entry.id);
+  store.step = Math.min(draft.step || 0, FORM.WIZARD_STEPS.length - 1);
+  store.answers = draft.answers || {};
+  store.narratives = { ...emptyNarratives(), ...(draft.narratives || {}) };
+  store.defaults = { ...DEFAULTS, ...(draft.defaults || {}) };
+  store.classification = draft.classification || '';
+  store.incidentType = draft.incidentType || '';
+  store.incidentTypeOther = draft.incidentTypeOther || '';
+  store.confirmed = { classification: false, firstAid: false, missedDays: false, ...(draft.confirmed || {}) };
+  store.savedAt = draft.savedAt || null;
+  applyWizardDefaults();
+  store.screen = draft.screen === 'review' ? 'review' : 'wizard';
+  if (store.screen === 'review') maybeDraft();
   render();
 }
 
-function startFroi() {
+async function startForm(entry) {
+  const existing = loadDraftFor(entry.id);
+  if (existing && !window.confirm('Start a new report? The saved draft on this device will be deleted.')) return;
+  try {
+    FORM = await loadForm(entry.id);
+  } catch (e) {
+    window.alert(`Could not load the ${entry.label} form: ${e.message || e}`);
+    return;
+  }
+  resetState(entry.id);
+  try { localStorage.removeItem(FORM.draftKey); } catch {}
   applyWizardDefaults();
   store.screen = 'wizard';
   render();
   saveDraft();
 }
 
+function clearDraft() {
+  if (!window.confirm('Delete this draft from the device? Drafts contain personal information — clear them once the report is filed.')) return;
+  if (FORM) { try { localStorage.removeItem(FORM.draftKey); } catch {} }
+  resetState(null);
+  FORM = null;
+  store.screen = 'landing';
+  render();
+}
+
 // Wizard-level defaults (dates default to today, branch questions default to
 // No, footwear condition defaults to Good) — applied only when unanswered.
 function applyWizardDefaults() {
-  for (const step of WIZARD_STEPS) {
+  for (const step of FORM.WIZARD_STEPS) {
     for (const f of allStepFields(step)) {
       if (store.answers[f.id] !== undefined && store.answers[f.id] !== '') continue;
       if (f.defaultToday) store.answers[f.id] = todayISO();
       else if (f.default !== undefined) store.answers[f.id] = f.default;
     }
   }
-}
-
-function allStepFields(step) {
-  return [...(step.fields || []), ...(step.sections || []).flatMap((s) => s.fields)];
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +210,18 @@ function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-function render() {
+// A <details> that remembers its open state across re-renders.
+function detailsSection(key, defaultOpen, attrs, ...children) {
+  const open = key in openSections ? openSections[key] : defaultOpen;
+  const el = h('details', { ...attrs, open }, ...children);
+  el.addEventListener('toggle', () => { openSections[key] = el.open; });
+  return el;
+}
+
+// keepScroll: true for in-place answer updates so a tap doesn't yank the
+// viewport back to the top of a long step; navigation renders scroll to top.
+function render({ keepScroll = false } = {}) {
+  const y = window.scrollY;
   const app = document.getElementById('app');
   app.replaceChildren(
     store.screen === 'landing' ? renderLanding()
@@ -158,8 +229,12 @@ function render() {
         : store.screen === 'review' ? renderReview()
           : renderDone()
   );
-  app.scrollTop = 0;
-  window.scrollTo(0, 0);
+  if (keepScroll) {
+    window.scrollTo(0, y);
+  } else {
+    app.scrollTop = 0;
+    window.scrollTo(0, 0);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +242,9 @@ function render() {
 // ---------------------------------------------------------------------------
 
 function renderLanding() {
-  const draft = loadDraft();
+  const drafts = FORM_REGISTRY.filter((f) => f.active)
+    .map((f) => ({ entry: f, draft: loadDraftFor(f.id) }))
+    .filter((d) => d.draft);
   return h('div', { class: 'shell' },
     h('header', { class: 'hero' },
       h('div', { class: 'brand' }, 'BEST Crowd Management'),
@@ -175,17 +252,25 @@ function renderLanding() {
       h('p', { class: 'muted' }, 'Shell Energy Stadium · Houston'),
     ),
     h('main', { class: 'stack' },
-      draft && h('div', { class: 'card resume-card' },
-        h('div', { class: 'card-title' }, 'Draft in progress'),
+      ...drafts.map(({ entry, draft }) => h('div', { class: 'card resume-card' },
+        h('div', { class: 'card-title' }, `${entry.label} — draft in progress`),
         h('p', { class: 'muted' }, `Last saved ${new Date(draft.savedAt || Date.now()).toLocaleString()}`),
-        h('button', { class: 'btn primary', onclick: () => resumeDraft(draft) }, 'Resume draft'),
-        h('button', { class: 'btn ghost danger', onclick: clearDraft }, 'Clear draft'),
-      ),
+        h('button', { class: 'btn primary', onclick: () => resumeForm(entry, draft) }, 'Resume draft'),
+        h('button', {
+          class: 'btn ghost danger',
+          onclick: async () => {
+            if (!window.confirm('Delete this draft from the device? Drafts contain personal information.')) return;
+            try { localStorage.removeItem(`${entry.id}.draft.v1`); } catch {}
+            render();
+          },
+        }, 'Clear draft'),
+      )),
       ...FORM_REGISTRY.map((f) => h('div', { class: `card form-card${f.active ? '' : ' inactive'}` },
         h('div', { class: 'card-title' }, f.label),
         h('p', { class: 'muted' }, f.description || ''),
         f.active
-          ? h('button', { class: 'btn primary', onclick: startFroi }, draft ? 'Start a new FROI' : 'File a FROI')
+          ? h('button', { class: 'btn primary', onclick: () => startForm(f) },
+            loadDraftFor(f.id) ? 'Start a new report' : (f.cta || `File: ${f.label}`))
           : h('span', { class: 'badge' }, 'Coming soon'),
       )),
     ),
@@ -198,17 +283,29 @@ function renderLanding() {
 // ---------------------------------------------------------------------------
 
 function isVisible(field) {
-  if (!field.showIf) return true;
+  if (!field || !field.showIf) return true;
   const v = store.answers[field.showIf.field];
   if (field.showIf.in) return field.showIf.in.includes(v);
   if (field.showIf.includes) return Array.isArray(v) && v.includes(field.showIf.includes);
   return true;
 }
 
+// Whether an answer's question is currently asked at all (its wizard field is
+// not hidden behind a showIf). Used to keep facts, summary, and blanks lists
+// consistent with what the filer was actually asked.
+function isAnswerVisible(id) {
+  return isVisible(FORM.fieldIdx[id]);
+}
+
 function setAnswer(id, value, { rerender = false } = {}) {
+  const changed = store.answers[id] !== value;
   store.answers[id] = value;
+  // Changing an answer that backs a required confirmation un-confirms it.
+  if (changed && CONFIRMATION_ANSWERS[id]) {
+    store.confirmed[CONFIRMATION_ANSWERS[id]] = false;
+  }
   saveDraft();
-  if (rerender) render();
+  if (rerender) render({ keepScroll: true });
 }
 
 function renderField(f) {
@@ -311,8 +408,8 @@ function sectionFilled(sec) {
 }
 
 function renderWizard() {
-  const step = WIZARD_STEPS[store.step];
-  const total = WIZARD_STEPS.length;
+  const step = FORM.WIZARD_STEPS[store.step];
+  const total = FORM.WIZARD_STEPS.length;
   return h('div', { class: 'shell' },
     h('header', { class: 'wiz-head' },
       h('div', { class: 'wiz-meta' },
@@ -325,7 +422,8 @@ function renderWizard() {
     ),
     h('main', { class: 'stack' },
       ...(step.fields || []).map(renderField),
-      ...(step.sections || []).map((sec) => h('details', { class: 'section', open: !sec.collapsed || sectionFilled(sec) },
+      ...(step.sections || []).map((sec) => detailsSection(
+        `wiz:${step.id}:${sec.label}`, !sec.collapsed || sectionFilled(sec), { class: 'section' },
         h('summary', {}, sec.label),
         sec.help && h('p', { class: 'field-help' }, sec.help),
         ...sec.fields.map(renderField),
@@ -373,88 +471,8 @@ function validateStep(step) {
 // AI drafting
 // ---------------------------------------------------------------------------
 
-const NARRATIVE_KEYS = [
-  ['location', 'location_description', 'Location of incident', 'Environment where it happened — goes in Section 3.'],
-  ['incident', 'incident_description', 'Description of incident', 'What happened, step by step.'],
-  ['activity', 'activity_description', 'What the employee was doing', 'Their task/rotation when it happened.'],
-  ['injury', 'injury_description', 'Injury / illness description', 'Symptoms and complaints as reported — no diagnoses.'],
-  ['cause', 'direct_cause', 'Direct cause', 'The machine, tool, object, substance, etc.'],
-  ['detailed', 'detailed_narrative', 'Detailed narrative (page 3 + comments)', 'The comprehensive chronological account.'],
-  ['specificInjury', 'specific_injury', 'Specific injury (short)', 'Short phrase, e.g. MINOR WRIST PAIN. Printed uppercase.'],
-];
-
-const RESPONSE_KEYS = [
-  'location_description', 'incident_description', 'activity_description',
-  'injury_description', 'direct_cause', 'detailed_narrative', 'specific_injury',
-  'suggested_incident_type', 'suggested_classification', 'classification_rationale', 'flags',
-];
-
-function prune(obj) {
-  if (Array.isArray(obj)) {
-    const a = obj.map(prune).filter((v) => v !== undefined);
-    return a.length ? a : undefined;
-  }
-  if (obj && typeof obj === 'object') {
-    const out = {};
-    for (const [k, v] of Object.entries(obj)) {
-      const p = prune(v);
-      if (p !== undefined) out[k] = p;
-    }
-    return Object.keys(out).length ? out : undefined;
-  }
-  if (obj === '' || obj == null) return undefined;
-  return obj;
-}
-
-// PII discipline: only narrative-relevant facts. SSN, DOB, home address, pay
-// data, phone numbers and employee # are NEVER sent — they map straight from
-// the wizard to PDF fields.
-function buildFacts() {
-  const a = store.answers;
-  return prune({
-    claimant_name: [a.firstName, a.lastName].map((s) => (s || '').trim()).filter(Boolean).join(' '),
-    job_title: a.jobTitle,
-    incident_date: isoToMDY(a.incidentDate),
-    incident_time: to12Hour(a.incidentTime),
-    date_reported: isoToMDY(a.dateReported),
-    initial_classification: a.classification,
-    location: { area: a.locationPick, exact_spot: a.exactSpot, indoor_outdoor: a.indoorOutdoor },
-    surface_type: a.surfaceType,
-    surface_condition: a.surfaceCondition,
-    weather: a.weather,
-    body_parts: [...(Array.isArray(a.bodyParts) ? a.bodyParts : []), a.bodyPartsOther].filter(Boolean).join(', '),
-    direct_cause_object: a.causeObject,
-    could_have_taken_alternate_path: a.altPath,
-    was_carrying_anything: a.carrying,
-    distracted_or_in_a_hurry: a.distracted,
-    performing_normal_job_functions: a.normalDuties,
-    questionable_case: a.questionableCase,
-    treatment_beyond_first_aid: a.beyondFirstAid,
-    hospital: a.hospitalName,
-    physician: a.physicianName,
-    lost_consciousness: a.lostConsciousness,
-    ambulance_called: a.ambulanceCalled,
-    ambulance_transport: a.transport,
-    fatality: a.fatality,
-    missed_days: a.missedDays,
-    missed_days_count: a.missedDaysCount,
-    return_to_work_date: isoToMDY(a.returnDate),
-    footwear: { description: a.footwearDesc, condition: a.footwearCondition },
-    ppe: a.ppe,
-    chair_involved: a.chairInvolved, chair_type: a.chairType, chair_condition: a.chairCondition,
-    stairs_involved: a.stairsInvolved, handrail: a.handrail, stair_condition: a.stairCondition,
-    fall_from_elevation: a.elevationFall,
-    ladder_involved: a.ladderInvolved, ladder_condition: a.ladderCondition,
-    hours_on_duty_prior: a.hoursOnDuty,
-    hours_prior_7_days: a.hoursPrior7,
-    witnesses: [
-      { name: a.w1_name, type: [...(Array.isArray(a.w1_type) ? a.w1_type : []), a.w1_typeOther].filter(Boolean).join('/') },
-      { name: a.w2_name, type: [...(Array.isArray(a.w2_type) ? a.w2_type : []), a.w2_typeOther].filter(Boolean).join('/') },
-    ].filter((w) => w.name),
-    supporting_documentation: [...(Array.isArray(a.docs) ? a.docs : []), a.docsOther].filter(Boolean).join(', '),
-    direct_supervisor: a.supervisor,
-    additional_comments: a.extraComments,
-  }) || {};
+function draftRequestKey() {
+  return JSON.stringify({ facts: FORM.buildFacts(store.answers), notes: store.answers.notes || '' });
 }
 
 function enterReview() {
@@ -466,15 +484,15 @@ function enterReview() {
 
 function maybeDraft() {
   if (!DRAFT_ENDPOINT) { store.ai.status = 'error'; store.ai.error = 'no-endpoint'; return; }
-  const key = JSON.stringify({ facts: buildFacts(), notes: store.answers.notes || '' });
+  const key = draftRequestKey();
   if (store.ai.status === 'done' && store.ai.key === key) return; // unchanged — keep draft
   if (store.ai.status === 'loading') return;
   callDraft(key);
 }
 
-async function callDraft(key) {
+async function callDraft(key, { overwrite = false } = {}) {
   store.ai = { status: 'loading', data: store.ai.data, error: null, key };
-  render();
+  render({ keepScroll: true });
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
   try {
@@ -486,12 +504,13 @@ async function callDraft(key) {
     });
     if (!res.ok) throw new Error(`draft endpoint returned ${res.status}`);
     const data = await res.json();
-    for (const k of RESPONSE_KEYS) {
+    for (const k of FORM.RESPONSE_KEYS) {
       if (!(k in data)) throw new Error(`draft response missing ${k}`);
     }
-    // Fill only empty narrative boxes — never clobber the filer's edits.
-    for (const [localKey, respKey] of NARRATIVE_KEYS) {
-      if (!store.narratives[localKey]) store.narratives[localKey] = String(data[respKey] || '');
+    // Fill empty narrative boxes; clobber existing text only on an explicit
+    // re-draft (the filer confirmed the replacement first).
+    for (const [localKey, respKey] of FORM.NARRATIVE_KEYS) {
+      if (overwrite || !store.narratives[localKey]) store.narratives[localKey] = String(data[respKey] || '');
     }
     store.ai = { status: 'done', data, error: null, key };
     saveDraft();
@@ -499,16 +518,17 @@ async function callDraft(key) {
     store.ai = { status: 'error', data: store.ai.data, error: e.name === 'AbortError' ? 'timed out' : String(e.message || e), key: '' };
   } finally {
     clearTimeout(timeout);
-    if (store.screen === 'review') render();
+    if (store.screen === 'review') render({ keepScroll: true });
   }
 }
 
 function redraft() {
   if (store.ai.status === 'loading') return;
-  const hasText = NARRATIVE_KEYS.some(([k]) => store.narratives[k]);
+  const hasText = FORM.NARRATIVE_KEYS.some(([k]) => store.narratives[k]);
   if (hasText && !window.confirm('Re-run the AI draft? This replaces all seven narrative boxes with fresh drafts.')) return;
-  store.narratives = emptyNarratives();
-  callDraft(JSON.stringify({ facts: buildFacts(), notes: store.answers.notes || '' }));
+  // Existing text is kept until the new draft actually arrives — a failed
+  // request must never destroy hand-written narrative.
+  callDraft(draftRequestKey(), { overwrite: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -517,22 +537,22 @@ function redraft() {
 
 function fmtValue(v) {
   if (Array.isArray(v)) return v.join(', ');
-  if (/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return isoToMDY(v);
-  if (/^\d{1,2}:\d{2}$/.test(String(v))) return to12Hour(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return FORM.isoToMDY(v);
+  if (/^\d{1,2}:\d{2}$/.test(String(v))) return FORM.to12Hour(v);
   return String(v);
 }
 
 function blanksList() {
   const a = store.answers;
   const out = [];
-  for (const [id, label, onlyIf] of FOLLOW_UP_FIELDS) {
+  for (const [id, label, onlyIf] of FORM.FOLLOW_UP_FIELDS) {
     if (onlyIf && !onlyIf(a)) continue;
+    if (!isAnswerVisible(id)) continue;
     const v = a[id];
     const empty = Array.isArray(v) ? v.length === 0 : !v || !String(v).trim();
     if (empty) out.push(label);
   }
-  if (!a.w1_name && !a.w2_name) out.push('Witness names/contact (confirm there were none)');
-  if (!store.incidentType) out.push('Type of incident (page 3)');
+  if (typeof FORM.extraBlanks === 'function') out.push(...FORM.extraBlanks(store));
   return out;
 }
 
@@ -558,7 +578,7 @@ function renderReview() {
       ...[['Near Miss', 'Near miss — no injury'], ['Workers Comp', "Workers' Comp claim — injury"]].map(([v, label]) => h('button', {
         type: 'button',
         class: `choice${store.classification === v ? ' selected' : ''}`,
-        onclick: () => { store.classification = v; store.confirmed.classification = true; saveDraft(); render(); },
+        onclick: () => { store.classification = v; store.confirmed.classification = true; saveDraft(); render({ keepScroll: true }); },
       }, label)),
     ),
     h('p', { class: 'field-help' }, 'Tap to confirm — even if it matches what you picked at the start.'),
@@ -566,14 +586,14 @@ function renderReview() {
       h('label', { class: 'field-label', for: 'f_incidentType' }, 'Type of incident (page 3)'),
       suggestion && suggestion.suggested_incident_type && !store.incidentType && h('button', {
         type: 'button', class: 'btn ghost small',
-        onclick: () => { store.incidentType = suggestion.suggested_incident_type; saveDraft(); render(); },
+        onclick: () => { store.incidentType = suggestion.suggested_incident_type; saveDraft(); render({ keepScroll: true }); },
       }, `Use AI suggestion: ${suggestion.suggested_incident_type}`),
       h('select', {
         id: 'f_incidentType',
-        onchange: (e) => { store.incidentType = e.target.value; saveDraft(); render(); },
+        onchange: (e) => { store.incidentType = e.target.value; saveDraft(); render({ keepScroll: true }); },
       },
         h('option', { value: '' }, '— choose —'),
-        ...OPTIONS['Type of Incident'].map((v) => h('option', { value: v, selected: store.incidentType === v }, v)),
+        ...FORM.OPTIONS['Type of Incident'].map((v) => h('option', { value: v, selected: store.incidentType === v }, v)),
       ),
       store.incidentType === 'Other' && h('input', {
         type: 'text', placeholder: 'Other — describe the incident type', value: store.incidentTypeOther,
@@ -596,14 +616,14 @@ function renderReview() {
       ai.error === 'no-endpoint'
         ? 'AI drafting is not configured — write the narrative by hand below. Your raw notes are underneath for reference.'
         : `AI drafting is unavailable (${ai.error}) — write the narrative by hand below, or retry.`,
-      DRAFT_ENDPOINT && h('button', { class: 'btn ghost small', onclick: () => callDraft(JSON.stringify({ facts: buildFacts(), notes: a.notes || '' })) }, 'Retry AI draft'),
+      DRAFT_ENDPOINT && h('button', { class: 'btn ghost small', onclick: () => callDraft(draftRequestKey()) }, 'Retry AI draft'),
     ),
-    (manual || !loading) && a.notes && h('details', { class: 'section', open: manual },
+    (manual || !loading) && a.notes && detailsSection('rev:rawnotes', manual, { class: 'section' },
       h('summary', {}, 'Your raw notes (reference)'),
       h('p', { class: 'raw-notes' }, a.notes),
     ),
     !loading && h('div', { class: 'stack' },
-      ...NARRATIVE_KEYS.map(([localKey, , label, help]) => h('div', { class: 'field' },
+      ...FORM.NARRATIVE_KEYS.map(([localKey, , label, help]) => h('div', { class: 'field' },
         h('label', { class: 'field-label', for: `n_${localKey}` }, label),
         help && h('p', { class: 'field-help' }, help),
         h('textarea', {
@@ -617,11 +637,12 @@ function renderReview() {
 
   const factsCard = h('div', { class: 'card' },
     h('div', { class: 'card-title' }, '3 · Facts on the form'),
-    ...REVIEW_SECTIONS.map((sec) => {
+    ...FORM.REVIEW_SECTIONS.map((sec) => {
       const rows = sec.items
+        .filter(([id]) => isAnswerVisible(id))
         .map(([id, label]) => [label, a[id]])
         .filter(([, v]) => (Array.isArray(v) ? v.length : v !== undefined && v !== ''));
-      return h('details', { class: 'section', open: false },
+      return detailsSection(`rev:facts:${sec.label}`, false, { class: 'section' },
         h('summary', {}, sec.label,
           h('button', {
             type: 'button', class: 'edit-link',
@@ -638,7 +659,7 @@ function renderReview() {
   const defaultsCard = h('div', { class: 'card' },
     h('div', { class: 'card-title' }, '4 · Standing defaults'),
     h('p', { class: 'field-help' }, 'Applied to every FROI automatically. Edit only if this report is different.'),
-    h('details', { class: 'section' },
+    detailsSection('rev:defaults', false, { class: 'section' },
       h('summary', {}, 'View / edit defaults'),
       ...Object.keys(DEFAULTS).map((name) => h('div', { class: 'field' },
         h('label', { class: 'field-label', for: `d_${name}` }, defaultLabel(name)),
@@ -651,7 +672,7 @@ function renderReview() {
   );
 
   const missedSummary = a.missedDays === 'Yes'
-    ? `Yes — ${a.missedDaysCount || '?'} day(s), return ${a.returnDate ? isoToMDY(a.returnDate) : 'TBD'}`
+    ? `Yes — ${a.missedDaysCount || '?'} day(s), return ${a.returnDate ? FORM.isoToMDY(a.returnDate) : 'TBD'}`
     : a.missedDays === 'No' ? 'No missed days' : 'Not answered yet';
 
   const confirmationsCard = h('div', { class: 'card' },
@@ -670,7 +691,7 @@ function renderReview() {
         h('div', { class: 'choice-row' },
           ...['Yes', 'No'].map((v) => h('button', {
             type: 'button', class: `choice small${a.beyondFirstAid === v ? ' selected' : ''}`,
-            onclick: () => { setAnswer('beyondFirstAid', v); store.confirmed.firstAid = true; saveDraft(); render(); },
+            onclick: () => { setAnswer('beyondFirstAid', v); store.confirmed.firstAid = true; saveDraft(); render({ keepScroll: true }); },
           }, v)),
         ),
       ),
@@ -683,7 +704,7 @@ function renderReview() {
         h('div', { class: 'choice-row' },
           ...['Yes', 'No'].map((v) => h('button', {
             type: 'button', class: `choice small${a.missedDays === v ? ' selected' : ''}`,
-            onclick: () => { setAnswer('missedDays', v); store.confirmed.missedDays = true; saveDraft(); render(); },
+            onclick: () => { setAnswer('missedDays', v); store.confirmed.missedDays = true; saveDraft(); render({ keepScroll: true }); },
           }, v)),
         ),
         a.missedDays === 'Yes' && h('div', { class: 'inline-fields' },
@@ -710,7 +731,11 @@ function renderReview() {
     h('p', { class: 'field-help' }, 'Blanks stay blank on the PDF — nothing is ever invented. Chase these down and pencil them in later; the PDF stays editable.'),
   );
 
-  const canGenerate = store.confirmed.classification && store.confirmed.firstAid && store.confirmed.missedDays && !!store.classification;
+  // Generate needs all three confirmations AND live answers behind them —
+  // un-confirming (or clearing an answer in the wizard) re-locks the button.
+  const canGenerate = store.confirmed.classification && !!store.classification
+    && store.confirmed.firstAid && !!a.beyondFirstAid
+    && store.confirmed.missedDays && !!a.missedDays;
 
   return h('div', { class: 'shell' },
     h('header', { class: 'wiz-head' },
@@ -722,7 +747,7 @@ function renderReview() {
       !canGenerate && h('p', { class: 'muted center' }, 'Generate unlocks once all three judgment calls are confirmed.'),
     ),
     h('footer', { class: 'wiz-foot' },
-      h('button', { class: 'btn ghost', onclick: () => { store.screen = 'wizard'; store.step = WIZARD_STEPS.length - 1; render(); } }, 'Back'),
+      h('button', { class: 'btn ghost', onclick: () => { store.screen = 'wizard'; store.step = FORM.WIZARD_STEPS.length - 1; render(); } }, 'Back'),
       h('button', { class: 'btn primary grow', disabled: !canGenerate, onclick: onGenerate }, 'Generate FROI PDF'),
     ),
   );
@@ -748,17 +773,11 @@ function defaultLabel(name) {
 // ---------------------------------------------------------------------------
 
 async function getTemplateBytes() {
-  if (templateBytesCache) return templateBytesCache;
-  const res = await fetch(TEMPLATE_URL);
+  if (templateBytesCache[FORM.id]) return templateBytesCache[FORM.id];
+  const res = await fetch(FORM.templateUrl);
   if (!res.ok) throw new Error(`could not load template (${res.status})`);
-  templateBytesCache = await res.arrayBuffer();
-  return templateBytesCache;
-}
-
-function outputFilename() {
-  const last = (store.answers.lastName || 'UNKNOWN').toUpperCase().replace(/[^A-Z0-9-]+/g, '') || 'UNKNOWN';
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(store.answers.incidentDate || '') ? store.answers.incidentDate : todayISO();
-  return `FROI_${last}_${date}.pdf`;
+  templateBytesCache[FORM.id] = await res.arrayBuffer();
+  return templateBytesCache[FORM.id];
 }
 
 async function onGenerate() {
@@ -768,11 +787,11 @@ async function onGenerate() {
   }
   try {
     const templateBytes = await getTemplateBytes();
-    const fill = buildFill(store);
-    const bytes = await fillFroi(window.PDFLib, templateBytes, fill);
+    const fill = FORM.buildFill(store);
+    const bytes = await FORM.fillFroi(window.PDFLib, templateBytes, fill);
     const blob = new Blob([bytes], { type: 'application/pdf' });
     if (store.generated?.url) URL.revokeObjectURL(store.generated.url);
-    store.generated = { url: URL.createObjectURL(blob), filename: outputFilename() };
+    store.generated = { url: URL.createObjectURL(blob), filename: FORM.outputFilename(store.answers, todayISO()) };
     store.screen = 'done';
     render();
     triggerDownload();
@@ -799,10 +818,11 @@ function summaryText() {
   const a = store.answers;
   const claimant = [a.lastName, a.firstName].map((s) => (s || '').trim().toUpperCase()).filter(Boolean).join(', ') || 'UNKNOWN';
   const lines = [];
-  lines.push(`FROI — ${claimant} — ${isoToMDY(a.incidentDate) || 'date unknown'}`);
+  lines.push(`FROI — ${claimant} — ${FORM.isoToMDY(a.incidentDate) || 'date unknown'}`);
   lines.push('Entered:');
-  for (const sec of REVIEW_SECTIONS) {
+  for (const sec of FORM.REVIEW_SECTIONS) {
     const vals = sec.items
+      .filter(([id]) => isAnswerVisible(id))
       .map(([id, label]) => [label, a[id]])
       .filter(([, v]) => (Array.isArray(v) ? v.length : v !== undefined && v !== ''))
       .map(([label, v]) => `${label}: ${fmtValue(v)}`);
@@ -811,7 +831,7 @@ function summaryText() {
   const blanks = blanksList();
   lines.push(`Left blank / need from you: ${blanks.length ? blanks.join('; ') : 'nothing'}`);
   const missed = a.missedDays === 'Yes'
-    ? `missed days: Yes (${a.missedDaysCount || '?'} days, return ${a.returnDate ? isoToMDY(a.returnDate) : 'TBD'})`
+    ? `missed days: Yes (${a.missedDaysCount || '?'} days, return ${a.returnDate ? FORM.isoToMDY(a.returnDate) : 'TBD'})`
     : `missed days: ${a.missedDays || 'unconfirmed'}`;
   lines.push(`Confirmed: ${store.classification === 'Near Miss' ? 'Near Miss (no injury)' : "Workers' Comp claim"}; treatment beyond first aid: ${a.beyondFirstAid || 'unconfirmed'}; ${missed}`);
   lines.push(`Reminder: send completed form + supporting docs to ${SUBMIT_EMAIL} ${SUBMIT_DEADLINE}.`);

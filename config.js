@@ -38,7 +38,7 @@ export const LOCATION_PICKS = [
 // Report registry for the landing page. Adding a form = new forms/<id>/ folder
 // (template.pdf, fieldmap.js, rulebook.js, wizard.js) + an entry here.
 export const FORM_REGISTRY = [
-  { id: 'froi', label: 'First Report of Injury', description: 'Employee injury or near miss (GardaWorld FROI)', active: true },
+  { id: 'froi', label: 'First Report of Injury', description: 'Employee injury or near miss (GardaWorld FROI)', cta: 'File a FROI', active: true },
   { id: 'incident', label: 'Incident Report', description: 'Non-injury incident reporting', active: false },
   { id: 'caf', label: 'CAF', description: 'Corrective action form', active: false },
 ];

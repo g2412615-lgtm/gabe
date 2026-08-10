@@ -263,9 +263,10 @@ export const REVIEW_SECTIONS = [
   },
 ];
 
-// Fields surfaced in the "Left blank — need from you" list when empty.
-// [answerId, label, onlyIf] — onlyIf gates conditionals (e.g. hospital info only
-// matters when treatment went beyond first aid).
+// Fields surfaced in the "Left blank — need from you" list when empty
+// (product rule 2: surface EVERY blank that maps to a PDF field).
+// [answerId, label, onlyIf?] — onlyIf gates conditionals; the engine also
+// skips entries whose wizard field is hidden by showIf.
 export const FOLLOW_UP_FIELDS = [
   ['lastName', "Claimant's last name"],
   ['firstName', "Claimant's first name"],
@@ -282,13 +283,53 @@ export const FOLLOW_UP_FIELDS = [
   ['payType', 'Pay type'],
   ['payRate', 'Pay rate'],
   ['avgHours', 'Average hours/week'],
+  ['incidentDate', 'Date of incident'],
   ['incidentTime', 'Time of incident'],
+  ['dateReported', 'Date reported'],
+  ['questionableCase', 'Questionable case (Yes/No)'],
+  ['beyondFirstAid', 'Treatment beyond first aid (Yes/No)'],
   ['hospitalName', 'Hospital / medical center name', (a) => a.beyondFirstAid === 'Yes'],
   ['physicianName', 'Physician name', (a) => a.beyondFirstAid === 'Yes'],
+  ['medAddress', 'Medical facility address', (a) => a.beyondFirstAid === 'Yes'],
+  ['medCityST', 'Medical facility city/state', (a) => a.beyondFirstAid === 'Yes'],
+  ['medZip', 'Medical facility ZIP', (a) => a.beyondFirstAid === 'Yes'],
+  ['medPhone', 'Medical facility phone', (a) => a.beyondFirstAid === 'Yes'],
+  ['lostConsciousness', 'Lost consciousness (Yes/No)'],
+  ['ambulanceCalled', 'Ambulance called (Yes/No)'],
+  ['fatality', 'Fatality (Yes/No)'],
+  ['missedDays', 'Missed days (Yes/No)'],
   ['missedDaysCount', 'Number of missed days', (a) => a.missedDays === 'Yes'],
   ['returnDate', 'Return-to-work date', (a) => a.missedDays === 'Yes'],
+  ['weather', 'Weather'],
+  ['surfaceType', 'Ground/floor type'],
+  ['surfaceCondition', 'Ground/floor condition'],
+  ['altPath', 'Alternate path available (page 3, Yes/No)'],
+  ['carrying', 'Carrying anything (page 3, Yes/No)'],
+  ['distracted', 'Distracted or hurried (page 3, Yes/No)'],
+  ['normalDuties', 'Normal job duties (page 3, Yes/No)'],
   ['footwearDesc', 'Footwear description'],
+  ['footwearCondition', 'Footwear condition'],
+  ['ppe', 'PPE involvement'],
+  ['chairInvolved', 'Chair involved (Yes/No)'],
+  ['chairType', 'Chair type', (a) => a.chairInvolved === 'Yes'],
+  ['chairCondition', 'Chair condition', (a) => a.chairInvolved === 'Yes'],
+  ['stairsInvolved', 'Stairs involved (Yes/No)'],
+  ['handrail', 'Handrail available/used', (a) => a.stairsInvolved === 'Yes'],
+  ['stairCondition', 'Stair condition', (a) => a.stairsInvolved === 'Yes'],
+  ['elevationFall', 'Fall from elevation (Yes/No)'],
+  ['ladderInvolved', 'Ladder involved (Yes/No)'],
+  ['ladderCondition', 'Ladder condition', (a) => a.ladderInvolved === 'Yes' || a.ladderInvolved === 'Other'],
   ['hoursOnDuty', 'Hours on duty prior to incident'],
   ['hoursPrior7', 'Hours worked in prior 7 days'],
   ['supervisor', "Direct supervisor's name"],
 ];
+
+// Blanks that aren't simple per-answer checks. Returns extra labels for the
+// "Left blank — need from you" list.
+export function extraBlanks(state) {
+  const a = state.answers || {};
+  const out = [];
+  if (!a.w1_name && !a.w2_name) out.push('Witness names/contact (confirm there were none)');
+  if (!state.incidentType) out.push('Type of incident (page 3)');
+  return out;
+}

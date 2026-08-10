@@ -29,6 +29,8 @@
     --warn-bg: #3a3213;
     --warn-line: #8a7a2e;
     --warn-ink: #f0e6b8;
+    --danger: #ff8a8f;
+    --ok: #5cc98a;
   }
 }
 
@@ -83,6 +85,7 @@ h1 { font-size: 1.45rem; margin: 0.35rem 0 0.4rem; }
 /* --- Wizard chrome --- */
 .wiz-head { padding: 18px 0 6px; }
 .wiz-meta { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--muted); }
+.save-failed { color: var(--danger); font-weight: 700; }
 .progress { height: 6px; background: var(--line); border-radius: 999px; margin: 8px 0 4px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.25s; }
 

@@ -229,6 +229,111 @@ export function to12Hour(hhmm) {
 const clean = (v) => (v == null ? '' : String(v).trim());
 
 // ---------------------------------------------------------------------------
+// AI drafting contract (§7): review-screen narrative boxes <-> response keys.
+// [localKey, responseKey, label, helper]
+// ---------------------------------------------------------------------------
+
+export const NARRATIVE_KEYS = [
+  ['location', 'location_description', 'Location of incident', 'Environment where it happened — goes in Section 3.'],
+  ['incident', 'incident_description', 'Description of incident', 'What happened, step by step.'],
+  ['activity', 'activity_description', 'What the employee was doing', 'Their task/rotation when it happened.'],
+  ['injury', 'injury_description', 'Injury / illness description', 'Symptoms and complaints as reported — no diagnoses.'],
+  ['cause', 'direct_cause', 'Direct cause', 'The machine, tool, object, substance, etc.'],
+  ['detailed', 'detailed_narrative', 'Detailed narrative (page 3 + comments)', 'The comprehensive chronological account.'],
+  ['specificInjury', 'specific_injury', 'Specific injury (short)', 'Short phrase, e.g. MINOR WRIST PAIN. Printed uppercase.'],
+];
+
+export const RESPONSE_KEYS = [
+  'location_description', 'incident_description', 'activity_description',
+  'injury_description', 'direct_cause', 'detailed_narrative', 'specific_injury',
+  'suggested_incident_type', 'suggested_classification', 'classification_rationale', 'flags',
+];
+
+// PII discipline (§3.6): only narrative-relevant facts go to the drafting
+// endpoint. SSN, DOB, home address, pay data, phone numbers and employee #
+// are NEVER included — they map straight from the wizard to PDF fields.
+// Conditional sub-answers are included only while their controlling toggle
+// still says Yes, so a corrected answer can't leak a stale fact into the
+// narrative.
+export function buildFacts(a) {
+  const prune = (obj) => {
+    if (Array.isArray(obj)) {
+      const arr = obj.map(prune).filter((v) => v !== undefined);
+      return arr.length ? arr : undefined;
+    }
+    if (obj && typeof obj === 'object') {
+      const out = {};
+      for (const [k, v] of Object.entries(obj)) {
+        const p = prune(v);
+        if (p !== undefined) out[k] = p;
+      }
+      return Object.keys(out).length ? out : undefined;
+    }
+    if (obj === '' || obj == null) return undefined;
+    return obj;
+  };
+  const beyondFA = a.beyondFirstAid === 'Yes';
+  const ems = a.ambulanceCalled === 'Yes';
+  const missed = a.missedDays === 'Yes';
+  return prune({
+    claimant_name: [a.firstName, a.lastName].map((s) => (s || '').trim()).filter(Boolean).join(' '),
+    job_title: a.jobTitle,
+    incident_date: isoToMDY(a.incidentDate),
+    incident_time: to12Hour(a.incidentTime),
+    date_reported: isoToMDY(a.dateReported),
+    initial_classification: a.classification,
+    location: { area: a.locationPick, exact_spot: a.exactSpot, indoor_outdoor: a.indoorOutdoor },
+    surface_type: a.surfaceType,
+    surface_condition: a.surfaceCondition,
+    weather: a.weather,
+    body_parts: [...(Array.isArray(a.bodyParts) ? a.bodyParts : []), a.bodyPartsOther].filter(Boolean).join(', '),
+    direct_cause_object: a.causeObject,
+    could_have_taken_alternate_path: a.altPath,
+    was_carrying_anything: a.carrying,
+    distracted_or_in_a_hurry: a.distracted,
+    performing_normal_job_functions: a.normalDuties,
+    questionable_case: a.questionableCase,
+    treatment_beyond_first_aid: a.beyondFirstAid,
+    hospital: beyondFA ? a.hospitalName : undefined,
+    physician: beyondFA ? a.physicianName : undefined,
+    lost_consciousness: a.lostConsciousness,
+    ambulance_called: a.ambulanceCalled,
+    ambulance_transport: ems ? a.transport : undefined,
+    fatality: a.fatality,
+    missed_days: a.missedDays,
+    missed_days_count: missed ? a.missedDaysCount : undefined,
+    return_to_work_date: missed ? isoToMDY(a.returnDate) : undefined,
+    footwear: { description: a.footwearDesc, condition: a.footwearCondition },
+    ppe: a.ppe,
+    chair_involved: a.chairInvolved,
+    chair_type: a.chairInvolved === 'Yes' ? a.chairType : undefined,
+    chair_condition: a.chairInvolved === 'Yes' ? a.chairCondition : undefined,
+    stairs_involved: a.stairsInvolved,
+    handrail: a.stairsInvolved === 'Yes' ? a.handrail : undefined,
+    stair_condition: a.stairsInvolved === 'Yes' ? a.stairCondition : undefined,
+    fall_from_elevation: a.elevationFall,
+    ladder_involved: a.ladderInvolved,
+    ladder_condition: (a.ladderInvolved === 'Yes' || a.ladderInvolved === 'Other') ? a.ladderCondition : undefined,
+    hours_on_duty_prior: a.hoursOnDuty,
+    hours_prior_7_days: a.hoursPrior7,
+    witnesses: [
+      { name: a.w1_name, type: [...(Array.isArray(a.w1_type) ? a.w1_type : []), a.w1_typeOther].filter(Boolean).join('/') },
+      { name: a.w2_name, type: [...(Array.isArray(a.w2_type) ? a.w2_type : []), a.w2_typeOther].filter(Boolean).join('/') },
+    ].filter((w) => w.name),
+    supporting_documentation: [...(Array.isArray(a.docs) ? a.docs : []), a.docsOther].filter(Boolean).join(', '),
+    direct_supervisor: a.supervisor,
+    additional_comments: a.extraComments,
+  }) || {};
+}
+
+// Download name: FROI_<LASTNAME>_<YYYY-MM-DD>.pdf
+export function outputFilename(a, todayIso) {
+  const last = (a.lastName || 'UNKNOWN').toUpperCase().replace(/[^A-Z0-9-]+/g, '') || 'UNKNOWN';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(a.incidentDate || '') ? a.incidentDate : todayIso;
+  return `FROI_${last}_${date}.pdf`;
+}
+
+// ---------------------------------------------------------------------------
 // Wizard state -> fill instructions
 // Returns { text: {name: value}, checks: [names], picks: {name: value} }.
 // Empty answers are omitted entirely — nothing is invented (product rule 1).
