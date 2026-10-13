@@ -1,0 +1,1315 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Editor shell (SPEC §7.6) — DeployMap's editor chrome: a surface header
+   with segmented wells, a side panel of pages, the dot-grid canvas, and a
+   comments panel that floats over the blueprint's right edge (it never
+   squeezes the canvas). On an iPad every control is a finger-sized target,
+   the page list becomes a drawer below 900 px, and the comments panel a
+   bottom sheet on phone widths.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* the editor fills the window; nothing scrolls but its own lists */
+.ed-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ── header ──────────────────────────────────────────────────────────── */
+
+.ed-header {
+  position: relative;
+  z-index: 40;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: calc(56px + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0px) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px));
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ed-header .icon-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+}
+
+.ed-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 10px 0 6px;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  flex: none;
+}
+@media (hover: hover) {
+  .ed-back:hover {
+    background: var(--surface-2);
+    color: var(--text);
+    text-decoration: none;
+  }
+}
+
+/* plan name: DeployMap's inline rename, with the title's divider */
+.ed-title {
+  display: flex;
+  align-items: center;
+  flex: 0 1 300px;
+  min-width: 90px;
+  padding: 0 10px 0 6px;
+  margin-right: 2px;
+  border-right: 1px solid var(--border);
+}
+.ed-title .model-name-input {
+  width: 100%;
+  min-width: 0;
+  letter-spacing: var(--track-tight);
+  text-overflow: ellipsis;
+}
+.ed-title-skel.skeleton {
+  width: 180px;
+  height: 18px;
+  border-radius: 6px;
+}
+
+/* sidebar toggle + ‹ Page 2 of 6 · label › */
+.ed-pager {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.ed-side-btn.on {
+  color: var(--text);
+}
+.ed-pages {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+button.ed-page-name {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  max-width: 320px;
+  height: 32px;
+  padding: 0 8px;
+  border-color: transparent;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 12.5px;
+}
+.ed-page-num {
+  flex: none;
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ed-pn-short {
+  display: none;
+}
+.ed-page-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+@media (hover: hover) {
+  button.ed-page-name:hover:not(:disabled) {
+    background: var(--surface-2);
+    border-color: transparent;
+  }
+  button.ed-page-name:hover .ed-page-label {
+    color: var(--text-2);
+  }
+}
+
+.ed-spacer {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.ed-break {
+  display: none;
+}
+.ed-modes,
+.ed-history {
+  flex: none;
+}
+.ed-history > button {
+  padding: 0 9px;
+}
+
+/* the "?" menu: DeployMap's .shortcut-list, in two sections */
+.ed-help-pop {
+  width: 340px;
+}
+.ed-help-sec + .ed-help-sec {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.ed-help-h {
+  margin: 0 0 7px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+/* one grid for all rows, so the descriptions line up at the widest key */
+.ed-help-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  align-items: baseline;
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+.ed-help-row {
+  display: contents;
+}
+.ed-help-row dt {
+  color: var(--text);
+  white-space: nowrap;
+}
+.ed-help-row dt kbd + kbd {
+  margin-left: 2px;
+}
+.ed-help-row dd {
+  margin: 0;
+  color: var(--text-2);
+}
+
+/* "Signed out" strip under the header (DeployMap's .editor-banner) */
+.editor-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px max(14px, env(safe-area-inset-right, 0px)) 9px max(14px, env(safe-area-inset-left, 0px));
+  background: var(--danger-soft);
+  border-bottom: 1px solid rgba(242, 109, 118, 0.35);
+  color: #fecaca;
+  font-size: 13px;
+  line-height: var(--lh-ui);
+}
+.editor-banner b {
+  color: #fff;
+}
+.editor-banner button {
+  margin-left: auto;
+  flex: none;
+}
+
+/* ── body ────────────────────────────────────────────────────────────── */
+
+.ed-body {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* the blueprint area: the canvas fills it; placeholders sit in its middle */
+.ed-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background-color: var(--canvas-bg);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+/* (phone widths: the canvas lifts its zoom buttons above the comments sheet — EditorPage passes it bottomInset) */
+
+/* ── left sidebar: Pages | Notes ─────────────────────────────────────── */
+
+.ed-left {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  width: 280px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border-subtle);
+  padding-left: env(safe-area-inset-left, 0px);
+}
+.ed-left.rail {
+  width: calc(56px + env(safe-area-inset-left, 0px));
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
+}
+/* below 900 px: a drawer over the blueprint */
+.ed-left.drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  width: min(320px, 88vw);
+  box-shadow: var(--shadow-3);
+  transform: translateX(-104%);
+  visibility: hidden;
+  transition: transform var(--t-base) var(--ease), visibility 0s linear var(--t-base);
+}
+.ed-left.drawer.open {
+  transform: none;
+  visibility: visible;
+  transition: transform var(--t-base) var(--ease);
+}
+.ed-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  background: rgba(5, 6, 8, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-base) var(--ease);
+}
+.ed-scrim.on {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ps-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px 10px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ps-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ps-tabs .evtab {
+  flex: 1 1 0;
+  justify-content: center;
+  min-width: 0;
+}
+.ps-tabs .evtab svg {
+  color: var(--muted);
+}
+.ps-tabs .evtab[aria-selected="true"] svg {
+  color: var(--text-2);
+}
+.ps-collapse {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+}
+.ps-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px;
+}
+.ps-none {
+  margin: 12px 8px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.ps-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border-subtle);
+}
+.ps-add.dropzone {
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.ps-add.dropzone .dz-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+.ps-add.dropzone strong {
+  font-size: var(--fs-sm);
+}
+.ps-add.dropzone .dz-hint {
+  font-size: var(--fs-xs);
+}
+.ps-add.dropzone .dz-text {
+  align-items: flex-start;
+}
+.ps-upload {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.ps-upload .progress {
+  flex: 1 1 auto;
+}
+.ps-upload .progress-label {
+  font-size: var(--fs-xs);
+}
+
+/* one page: thumbnail, label (two lines), status; ⋯ on the right */
+.ps-pages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ps-page {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 9px;
+  transition: background-color var(--t-fast) var(--ease);
+}
+.ps-page.active {
+  background: var(--surface-3);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+button.ps-open,
+.ps-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  height: auto;
+  padding: 6px 4px 6px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+}
+@media (hover: hover) {
+  .ps-page:not(.active):hover {
+    background: var(--surface-2);
+  }
+  button.ps-open:hover:not(:disabled) {
+    background: transparent;
+    border-color: transparent;
+  }
+}
+.ps-thumb {
+  flex: none;
+  width: 96px;
+  height: 68px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--canvas-paper);
+  border: 1px solid var(--border-strong);
+}
+.ps-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.ps-thumb.placeholder {
+  background: var(--surface-2);
+  color: var(--faint);
+}
+.ps-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ps-label {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ps-index {
+  margin-right: 6px;
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.ps-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.ps-meta .spinner {
+  color: var(--warn);
+}
+.ps-sharpen {
+  color: var(--faint);
+  white-space: pre;
+}
+.ps-failed {
+  color: var(--danger);
+}
+.ps-rename.model-name-input {
+  width: 100%;
+  margin-left: -6px;
+  font-size: var(--fs-sm) !important;
+}
+.ps-acts {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 0 4px;
+}
+/* the ⋯ shows on hover, on the open page, and always on touch */
+.ps-more {
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.ps-page:hover .ps-more,
+.ps-page.active .ps-more,
+.ps-page:focus-within .ps-more,
+.ps-more.toggled,
+.ps-more:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .ps-more {
+    opacity: 1;
+  }
+}
+.ps-retry {
+  color: var(--danger);
+}
+
+/* collapsed: a rail of page numbers */
+.ps-expand {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+}
+.ps-rail {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 calc(10px + env(safe-area-inset-bottom, 0px));
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+.ps-rail li:first-child {
+  margin-top: 6px;
+}
+button.ps-rail-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+button.ps-rail-btn.active {
+  background: var(--surface-3);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+@media (hover: hover) {
+  button.ps-rail-btn:not(.active):hover:not(:disabled) {
+    background: var(--surface-2);
+    border-color: transparent;
+  }
+}
+.ps-rail-flag {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.ps-rail-flag.busy {
+  background: var(--warn);
+}
+.ps-rail-flag.failed {
+  background: var(--danger);
+}
+
+/* ── Notes tab ───────────────────────────────────────────────────────── */
+
+.nl-scope.evtabs {
+  display: flex;
+  margin: 2px 2px 10px;
+}
+.nl-scope .evtab {
+  flex: 1 1 0;
+  justify-content: center;
+}
+.nl-scope .evtab[aria-pressed="true"] {
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.nl-group + .nl-group {
+  margin-top: 14px;
+}
+.nl-group-h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+.nl-group-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nl-group-count {
+  flex: none;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--faint);
+}
+.nl-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+button.nl-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  height: auto;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  text-align: left;
+}
+button.nl-row.active {
+  background: var(--surface-3);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+@media (hover: hover) {
+  button.nl-row:hover:not(:disabled) {
+    background: var(--surface-2);
+    border-color: var(--border);
+  }
+  button.nl-row.active:hover:not(:disabled) {
+    background: var(--surface-3);
+  }
+}
+.nl-dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid;
+}
+.nl-num {
+  flex: none;
+  min-width: 26px;
+  color: var(--text-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.nl-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nl-text.none {
+  color: var(--muted);
+}
+.nl-count {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.nl-empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.nl-empty p {
+  margin: 0 auto;
+  max-width: 32ch;
+}
+.nl-empty .nl-empty-h {
+  margin-bottom: 6px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ── placeholders and whole-screen states ───────────────────────────── */
+
+.ed-card {
+  width: min(440px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 24px 24px;
+  text-align: center;
+  background: var(--surface);
+  background-image: var(--card-grad);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--hairline), var(--shadow-2);
+}
+.ed-card.wide {
+  width: min(520px, calc(100% - 32px));
+}
+.ed-card h2 {
+  margin: 8px 0 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.ed-card p {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+.ed-card > .spinner {
+  color: var(--accent);
+}
+.ed-card .ed-card-note {
+  color: var(--faint);
+  font-size: var(--fs-xs);
+}
+.ed-card-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.ed-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.ed-card-actions > button,
+.ed-card-actions > a.btn {
+  height: 34px;
+  padding: 0 14px;
+}
+.ed-card-drop.dropzone {
+  width: 100%;
+  min-height: 140px;
+  margin-top: 12px;
+}
+.ed-card-progress {
+  width: 100%;
+  margin-top: 4px;
+}
+.ed-message {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  background-color: var(--canvas-bg);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.ed-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  box-shadow: var(--shadow-2);
+}
+
+/* ── the comments panel (floats over the stage's right edge) ─────────── */
+
+.ed-right {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  width: 340px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-left: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-3);
+  padding-right: env(safe-area-inset-right, 0px);
+  transform: translateX(calc(100% + 24px));
+  visibility: hidden;
+  transition: transform var(--t-base) var(--ease), visibility 0s linear var(--t-base);
+}
+.ed-right.open {
+  transform: none;
+  visibility: visible;
+  transition: transform var(--t-base) var(--ease);
+}
+/* phone widths: a bottom sheet */
+.ed-right.sheet {
+  top: auto;
+  left: 0;
+  width: auto;
+  height: 60%;
+  border-left: 0;
+  border-top: 1px solid var(--border-strong);
+  border-radius: 14px 14px 0 0;
+  padding-right: 0;
+  transform: translateY(calc(100% + 24px));
+}
+.ed-right.sheet.open {
+  transform: none;
+}
+
+.cp {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.cp-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px 10px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.cp-dot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2.5px solid;
+}
+.cp-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: var(--track-tight);
+  font-variant-numeric: tabular-nums;
+}
+button.cp-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+}
+.cp-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 16px 16px;
+}
+
+/* the circle's name: borderless until hovered or focused (like the plan name) */
+input.cp-title {
+  display: block;
+  width: calc(100% + 16px);
+  margin: 0 -8px;
+  height: 34px;
+  padding: 0 8px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+@media (hover: hover) {
+  input.cp-title:hover {
+    border-color: var(--border);
+  }
+}
+input.cp-title:focus {
+  background: var(--input-bg);
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.cp-look {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.cp-swatches {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+button.cp-swatch {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+}
+.cp-swatch span {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2.5px solid;
+  transition: transform var(--t-fast) var(--ease);
+}
+button.cp-swatch.on {
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1.5px var(--text-2);
+}
+@media (hover: hover) {
+  button.cp-swatch:hover:not(:disabled) {
+    background: var(--surface-2);
+    border-color: transparent;
+  }
+  button.cp-swatch.on:hover:not(:disabled) {
+    background: var(--surface-3);
+  }
+  button.cp-swatch:hover span {
+    transform: scale(1.1);
+  }
+}
+.cp-size {
+  flex: 1 1 110px;
+  min-width: 110px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.cp-size input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+  box-shadow: none;
+}
+
+.cp-comments {
+  margin-top: 14px;
+}
+.cp-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+.cp-h .count {
+  padding: 0 7px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.cp-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.cp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cp-comment {
+  padding: 10px 12px 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.cp-comment.editing {
+  padding: 8px;
+  border-color: rgba(247, 168, 27, 0.35);
+}
+.cp-body {
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: var(--lh-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cp-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.cp-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.cp-comment:hover .cp-actions,
+.cp-comment:focus-within .cp-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .cp-actions {
+    opacity: 1;
+  }
+}
+button.cp-act {
+  height: 24px;
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+button.cp-act.danger {
+  color: var(--danger);
+  border-color: transparent;
+}
+@media (hover: hover) {
+  button.cp-act:hover:not(:disabled) {
+    background: var(--surface-3);
+    border-color: transparent;
+    color: var(--text);
+  }
+  button.cp-act.danger:hover:not(:disabled) {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+}
+textarea.cp-edit,
+textarea.cp-input {
+  display: block;
+  width: 100%;
+  font-size: 13.5px;
+}
+.cp-edit-foot,
+.cp-composer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+.cp-note {
+  font-size: var(--fs-xs);
+  color: var(--faint);
+}
+.cp-note kbd {
+  font-size: 10.5px;
+}
+.cp-composer {
+  flex: none;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface);
+}
+.cp-foot {
+  flex: none;
+  display: flex;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border-subtle);
+}
+.cp-delete svg {
+  flex: none;
+}
+
+/* ── narrower screens ────────────────────────────────────────────────── */
+
+/* labels give way to icons (names stay in aria-label and the tooltip) */
+@media (max-width: 1099px) {
+  .ed-header .lbl {
+    display: none;
+  }
+  .ed-pn-long {
+    display: none;
+  }
+  .ed-pn-short {
+    display: inline;
+  }
+  button.ed-page-name {
+    max-width: 240px;
+  }
+}
+
+/* the header wraps to two rows: name, save, help on top; pages and tools below */
+@media (max-width: 899px) {
+  .ed-header {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding-top: calc(8px + env(safe-area-inset-top, 0px));
+    padding-bottom: 8px;
+  }
+  .ed-back-lbl {
+    display: none;
+  }
+  .ed-title {
+    flex: 1 1 0;
+    min-width: 0;
+    border-right: 0;
+    padding-right: 0;
+  }
+  .ed-spacer {
+    display: none;
+  }
+  .ed-break {
+    display: block;
+    order: 4;
+    flex: 0 0 100%;
+    height: 0;
+  }
+  .ed-pager {
+    order: 5;
+    flex: 1 1 auto;
+  }
+  .ed-modes {
+    order: 6;
+  }
+  .ed-history {
+    order: 7;
+  }
+  button.ed-page-name {
+    max-width: none;
+  }
+}
+
+/* phones: the page number without its label, tighter spacing */
+@media (max-width: 599px) {
+  .ed-header {
+    gap: 4px;
+    padding-left: max(8px, env(safe-area-inset-left, 0px));
+    padding-right: max(8px, env(safe-area-inset-right, 0px));
+  }
+  .ed-pager,
+  .ed-pages {
+    gap: 0;
+  }
+  .ed-page-label {
+    display: none;
+  }
+  button.ed-page-name {
+    padding: 0 4px;
+  }
+}
+
+/* the second header row has room again for the words (not on a phone) */
+@media (min-width: 600px) and (max-width: 899px) {
+  .ed-header .lbl {
+    display: inline;
+  }
+  .ed-pn-long {
+    display: inline;
+  }
+  .ed-pn-short {
+    display: none;
+  }
+}
+
+/* ── touch: finger-sized targets ─────────────────────────────────────── */
+
+@media (pointer: coarse) {
+  .ed-header .icon-btn,
+  .ps-collapse,
+  .ps-expand,
+  button.cp-close {
+    width: var(--hit);
+    height: var(--hit);
+  }
+  .ed-back,
+  button.ed-page-name {
+    height: var(--hit);
+  }
+  /* "← Plans" shrinks to its arrow below 900 px: keep it a full square */
+  .ed-back {
+    min-width: var(--hit);
+    justify-content: center;
+  }
+  /* the save pill stays a slim pill; an invisible margin makes it a full finger target */
+  .ed-header .save-status {
+    position: relative;
+  }
+  .ed-header .save-status::after {
+    content: "";
+    position: absolute;
+    inset: -4px -3px;
+  }
+  .ed-header {
+    gap: 6px;
+  }
+  .ed-left.rail {
+    width: calc(60px + env(safe-area-inset-left, 0px));
+  }
+  button.ps-rail-btn {
+    width: var(--hit);
+    height: var(--hit);
+  }
+  button.ps-open {
+    min-height: 80px;
+  }
+  .ps-more {
+    width: var(--hit);
+  }
+  button.nl-row {
+    min-height: var(--hit);
+  }
+  button.cp-swatch {
+    width: var(--hit);
+    height: var(--hit);
+    min-width: var(--hit);
+  }
+  .cp-swatch span {
+    width: 24px;
+    height: 24px;
+  }
+  .cp-swatches {
+    gap: 0;
+  }
+  .cp-size input[type="range"] {
+    height: var(--hit);
+  }
+  /* Edit / Delete on a comment: full finger height, and apart so a tap meant for one can't land on the other */
+  button.cp-act {
+    height: var(--hit);
+    min-height: var(--hit);
+    min-width: var(--hit);
+    padding: 0 12px;
+    font-size: var(--fs-sm);
+  }
+  .cp-actions {
+    gap: 8px;
+  }
+  /* Undo / Redo are icon-only: as wide as they are tall */
+  .ed-history > button {
+    min-width: var(--hit);
+  }
+  /* Add, Done */
+  .cp-composer-foot button,
+  .cp-edit-foot button {
+    min-width: var(--hit);
+  }
+  textarea.cp-edit,
+  textarea.cp-input {
+    font-size: 16px;
+  }
+  input.cp-title {
+    height: var(--hit);
+    font-size: 16px;
+  }
+  /* the page-rename field: under 16 px, iPad Safari zooms the whole editor in when it takes focus */
+  .ps-rename.model-name-input {
+    font-size: 16px !important;
+  }
+}
+
+/* chevrons in menus pointing up/down (the icon set's chevron points right) */
+.hmenu-item svg.rot-up {
+  transform: rotate(-90deg);
+}
+.hmenu-item svg.rot-down {
+  transform: rotate(90deg);
+}

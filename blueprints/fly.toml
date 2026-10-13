@@ -1,0 +1,39 @@
+# Fly.io config — Blueprint Notes (https://blueprints.gabeweb.com).
+# One machine + one volume: the SQLite database, the uploaded blueprints and
+# the rendered page images all live on the volume at /data, so there is
+# nothing else to run or pay for. Deploy from this folder (or let the GitHub
+# Action do it): fly deploy -a gabeweb-blueprints --remote-only --ha=false
+app = "gabeweb-blueprints"
+primary_region = "dfw"
+# give a page that's being prepared up to 10 s to finish when a deploy
+# restarts the machine (a cut-off render is simply redone, never lost)
+kill_timeout = 15
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+  DATA_DIR = "/data"
+  # off-site copies go under this prefix in the R2 bucket (only when the R2_*
+  # secrets are set — see DEPLOY.md, optional)
+  R2_PREFIX = "blueprints"
+
+[mounts]
+  source = "data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # "suspend" freezes the idle machine instead of shutting it down, so the
+  # first visit after a quiet spell resumes in about a second
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+# 2 GB: a 36×48 in sheet is rendered as an 8000 px image in memory.
+# No swap here — Fly can't suspend a machine that has swap.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "2gb"

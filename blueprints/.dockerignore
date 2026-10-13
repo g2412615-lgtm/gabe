@@ -1,0 +1,11 @@
+# Keep local data and junk out of the image — the live database and
+# blueprints live on the Fly volume, never in the image.
+node_modules
+dist
+data
+test-results
+playwright-report
+tests/fixtures/out
+*.log
+.env.local
+.git
