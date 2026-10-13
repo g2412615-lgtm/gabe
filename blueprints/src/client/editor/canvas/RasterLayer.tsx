@@ -5,16 +5,21 @@
 //
 // Level changes never flash blurry: the last level that fully covered the
 // screen stays mounted underneath until the new level's tiles in view have
-// all loaded.
+// all loaded. And they wait for the zoom to settle: a pinch or a wheel burst
+// fetches only the level it ends on, not every level it passes (planTiles).
 
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent } from "react";
-import { pickLevel, type View } from "../../../shared/geometry";
+import type { View } from "../../../shared/geometry";
 import type { PageRow } from "../../../shared/types";
 import { assetUrl } from "../../api";
-import { visibleTiles, type Size, type TileBox } from "./viewMath";
+import { planTiles, visibleTiles, type Size, type TileBox } from "./viewMath";
 
 /** How many finished tiles to remember (so one coming back into view skips the fade). */
 const DONE_MEMORY = 3000;
+/** Mid-zoom, the level may change once the scale has held still this long (ms)… */
+const LEVEL_SETTLE_MS = 150;
+/** …give or take 3% (two fingers panning never hold the scale perfectly still). */
+const STEADY_LOG = Math.log(1.03);
 
 type OnDone = (id: string, ok: boolean, img: HTMLImageElement) => void;
 
@@ -49,7 +54,7 @@ const Tile = memo(function Tile({ page, t, extra, shown, onDone }: TileProps) {
   );
 }, sameTile);
 
-function RasterLayer({ page, view, size }: { page: PageRow; view: View; size: Size }) {
+function RasterLayer({ page, view, size, zooming }: { page: PageRow; view: View; size: Size; zooming: boolean }) {
   const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
 
   // Tiles that finished: true = loaded, false = failed (a missing tile must
@@ -75,13 +80,27 @@ function RasterLayer({ page, view, size }: { page: PageRow; view: View; size: Si
       });
   }, []);
 
-  const target = size.w > 0 && size.h > 0 ? pickLevel(page, view.scale, dpr) : null;
-  const wanted = target === null ? [] : visibleTiles(page, view, size, target);
-  const complete = wanted.every((t) => done.has(tileId(page, t)));
+  // Settled = no zoom under way (the controller says when an animation, a
+  // wheel burst or a pinch ends), or the scale is where it was when it last
+  // held still for LEVEL_SETTLE_MS (fingers resting mid-pinch, give or take
+  // a two-finger pan's wobble).
+  const [quietScale, setQuietScale] = useState(view.scale);
+  const settled = !zooming || Math.abs(Math.log(view.scale / quietScale)) < STEADY_LOG;
+  useEffect(() => {
+    if (view.scale === quietScale) return;
+    const t = setTimeout(() => setQuietScale(view.scale), LEVEL_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [view.scale, quietScale]);
+
+  // The level chosen at the last settled frame: held while the zoom moves.
+  const heldRef = useRef<{ level: number | null; assetKey: string } | null>(null);
+  const held = heldRef.current?.assetKey === page.assetKey ? heldRef.current.level : undefined;
+  const { target, tiles: wanted, complete } = planTiles(page, view, size, dpr, settled, held, (t) => done.get(tileId(page, t)));
 
   // The last level whose tiles fully covered the screen: the fallback.
   const stableRef = useRef<{ level: number; assetKey: string } | null>(null);
   useLayoutEffect(() => {
+    if (settled) heldRef.current = { level: target, assetKey: page.assetKey };
     if (target !== null && complete) stableRef.current = { level: target, assetKey: page.assetKey };
   });
   const fb = stableRef.current?.assetKey === page.assetKey ? stableRef.current.level : null;

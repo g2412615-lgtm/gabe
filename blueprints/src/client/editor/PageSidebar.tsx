@@ -20,9 +20,8 @@ import Menu from "../ui/Menu";
 import Progress from "../ui/Progress";
 import Spinner from "../ui/Spinner";
 import { IconChevron, IconEdit, IconLayers, IconList, IconMore, IconSidebar, IconTrash, IconUpload, IconX } from "../ui/icons";
-import { notify } from "../ui/notify";
 import { usePlanState, type PlanStore } from "../sync";
-import { retryPage } from "./actions";
+import { deletePageWithUndo, retryPage } from "./actions";
 import { plural } from "./format";
 import NotesList from "./NotesList";
 import type { AddPages, UploadItem } from "./useAddPages";
@@ -207,16 +206,7 @@ const PageItem = memo(function PageItem({ store, page, index, count, active, cir
       danger: true,
     });
     if (!ok) return;
-    store.deletePage(page.id);
-    notify(`Deleted page “${page.label}”.`, "info", {
-      action: {
-        label: "Undo",
-        run: () => {
-          store.restorePage(page.id);
-          onOpen(page.id);
-        },
-      },
-    });
+    deletePageWithUndo(store, page, () => onOpen(page.id));
   };
 
   const status = <PageStatusLine page={page} circles={circles.length} />;
@@ -232,6 +222,7 @@ const PageItem = memo(function PageItem({ store, page, index, count, active, cir
               editing
               onEditingChange={setRenaming}
               onCommit={(label) => store.renamePage(page.id, label)}
+              commitWhileTyping
               ariaLabel="Page name"
               maxLength={MAX_LABEL_CHARS}
               className="ps-rename"

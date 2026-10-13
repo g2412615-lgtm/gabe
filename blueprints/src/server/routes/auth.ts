@@ -23,8 +23,9 @@ export function authRoutes(deps: AppDeps) {
       throw new HttpError(401, "That password isn't right.");
     }
     deps.throttle.succeed(ip);
-    const session = mintToken(deps.secret);
-    c.header("Set-Cookie", sessionCookie(c, session.token, cookieMaxAge(session)));
+    const now = Date.now();
+    const session = mintToken(deps.secret, now);
+    c.header("Set-Cookie", sessionCookie(c, session.token, cookieMaxAge(session, now)));
     return c.json({ ok: true });
   });
 

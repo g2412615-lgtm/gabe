@@ -4,8 +4,9 @@
 // Keys are ignored while the owner is typing in a field (except ⌘/Ctrl+S,
 // which saves from anywhere), while a dialog or menu is open, and when
 // someone else already handled the key (preventDefault, e.g. Escape closing
-// a menu). Plain-letter shortcuts never fire with ⌘/Ctrl/Alt held, so ⌘C
-// still copies.
+// a menu). A focused slider keeps only the keys it moves with; buttons and
+// checkboxes keep none. Plain-letter shortcuts never fire with ⌘/Ctrl/Alt
+// held, so ⌘C still copies.
 
 import { useEffect, useRef } from "react";
 import { isOverlayOpen } from "../ui/layers";
@@ -28,15 +29,28 @@ export interface EditorKeyHandlers {
   focusSelected(): void;
 }
 
-const NOT_TEXT = new Set(["button", "checkbox", "radio", "submit", "reset", "color", "file", "image"]);
+/** Inputs nobody types in: the editor's shortcuts work while one has focus. */
+const NOT_TEXT = new Set(["button", "checkbox", "radio", "submit", "reset", "color", "file", "image", "range"]);
+/** The keys a focused slider moves with (the size slider keeps focus after a mouse drag). */
+const SLIDER_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
 
-/** Is the key going into something the owner types in? */
-function isTyping(t: EventTarget | null): boolean {
-  if (!(t instanceof HTMLElement)) return false;
-  if (t.isContentEditable) return true;
-  if (t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return true;
-  // a focused range slider counts too: its arrow keys and Delete belong to it
-  return t instanceof HTMLInputElement && !NOT_TEXT.has(t.type);
+/**
+ * Does this key belong to the focused element rather than to the editor?
+ * Everything typed into a text field, a select or contenteditable does; a
+ * slider keeps only its own keys, so ⌘Z, Esc and the letter shortcuts still
+ * work right after resizing a circle with it.
+ */
+export function keyBelongsToField(t: EventTarget | { tagName?: string; type?: string; isContentEditable?: boolean } | null, key: string): boolean {
+  // duck-typed (no instanceof): also works on elements of another frame, and in tests
+  const el = t as { tagName?: unknown; type?: unknown; isContentEditable?: unknown } | null;
+  if (!el || typeof el.tagName !== "string") return false;
+  if (el.isContentEditable === true) return true;
+  const tag = el.tagName.toUpperCase();
+  if (tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (tag !== "INPUT") return false;
+  const type = typeof el.type === "string" && el.type ? el.type.toLowerCase() : "text";
+  if (type === "range") return SLIDER_KEYS.has(key);
+  return !NOT_TEXT.has(type);
 }
 
 export function useEditorKeys(handlers: EditorKeyHandlers) {
@@ -55,7 +69,7 @@ export function useEditorKeys(handlers: EditorKeyHandlers) {
         h.save();
         return;
       }
-      if (e.defaultPrevented || isOverlayOpen() || isTyping(e.target)) return;
+      if (e.defaultPrevented || isOverlayOpen() || keyBelongsToField(e.target, e.key)) return;
 
       if (mod) {
         if (e.altKey) return;

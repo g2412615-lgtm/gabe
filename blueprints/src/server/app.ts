@@ -97,8 +97,9 @@ export function createApp(input: Partial<ServerConfig> = {}): AppHandle {
     // Keep a device that's in use signed in: re-issue the cookie about once a
     // week (same sign-in time, so the one-year limit still applies).
     if (renew && c.res.status < 400) {
-      const renewed = mintToken(deps.secret, Date.now(), renew.issuedAt);
-      c.res.headers.append("Set-Cookie", sessionCookie(c, renewed.token, cookieMaxAge(renewed)));
+      const now = Date.now();
+      const renewed = mintToken(deps.secret, now, renew.issuedAt);
+      c.res.headers.append("Set-Cookie", sessionCookie(c, renewed.token, cookieMaxAge(renewed, now)));
     }
     if (!c.res.headers.has("Cache-Control")) c.res.headers.set("Cache-Control", "no-store");
   });

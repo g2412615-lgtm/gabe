@@ -10,7 +10,11 @@
 //   - when a pinch loses a finger the remaining one re-baselines into a pan
 //     from where everything is now, so lifting a finger never jumps;
 //   - a second finger cancels whatever the first one was doing and no tap
-//     fires until every finger is up.
+//     fires until every finger is up;
+//   - a drag pans unless it starts on something meant to be dragged: the
+//     selected circle's grip (moves it), a handle (resizes), or the body of
+//     a selected circle small enough that the grip covers most of it anyway.
+//     A big selected circle never takes the blueprint away from the owner.
 
 import { DEFAULT_CIRCLE_SCREEN_R, MAX_CIRCLE_R, MIN_CIRCLE_R } from "../../../shared/constants";
 import { clamp, clamp01, longSide, screenToWorld, worldToScreen, type Pt, type View } from "../../../shared/geometry";
@@ -20,8 +24,11 @@ import type { CanvasGestureEvent, CanvasMode, PointerKind } from "./types";
 
 /** Movement (screen px) below which a press is still a tap. */
 export const TAP_SLOP: Record<PointerKind, number> = { touch: 10, mouse: 4, pen: 4 };
-/** Handles have no tap meaning, so a drag starts almost at once. */
-export const HANDLE_SLOP = 2;
+/**
+ * Handles and the move grip have no tap meaning, so a drag starts almost at
+ * once — but not on the jitter of a resting fingertip.
+ */
+export const HANDLE_SLOP: Record<PointerKind, number> = { touch: 5, mouse: 2, pen: 3 };
 export const TAP_MAX_MS = 600;
 export const LONG_PRESS_MS = 500;
 /** Second tap must land within this long after the first lifted… */
@@ -145,11 +152,14 @@ export class GestureMachine {
   // ── events ────────────────────────────────────────────────────────────
 
   down(p: PointerSample): void {
-    if (p.type === "touch" && p.isPrimary) {
-      // The first finger of a new touch: any touch we still track missed its
-      // pointerup (iOS drops one now and then). Forget it, or this finger
-      // would start a pinch with a ghost.
-      for (const [id, t] of this.pointers) if (t.type === "touch") this.forget(id);
+    if (p.type !== "mouse" && p.isPrimary) {
+      // The first finger (or pencil) of a new touch: any of its kind we still
+      // track missed its pointerup (iOS drops one now and then). Forget it,
+      // or this one would start a pinch with a ghost. (isPrimary is per
+      // type, so a pencil says nothing about fingers and vice versa.)
+      for (const [id, t] of this.pointers) if (t.type === p.type) this.forget(id);
+      // …and whatever the ghost was part of no longer holds back the next tap
+      if (this.contacts().length === 0) this.multi = false;
     }
     this.pointers.set(p.id, { type: p.type, x: p.x, y: p.y });
 
@@ -174,7 +184,8 @@ export class GestureMachine {
 
     const hit = this.host.hitTest(pt, p.type);
     let hold: unknown = null;
-    if (p.type !== "mouse" && this.host.mode() === "move" && (hit.kind === "paper" || (hit.kind === "circle" && !hit.selected))) {
+    // Long press adds wherever a drag would pan (paper, any circle body that doesn't move).
+    if (p.type !== "mouse" && this.host.mode() === "move" && (hit.kind === "paper" || (hit.kind === "circle" && !hit.grab))) {
       hold = this.clock.setTimeout(() => this.longPress(p.id), LONG_PRESS_MS);
     }
     this.s = { k: "press", pid: p.id, type: p.type, start: pt, t0: this.clock.now(), hit, hold };
@@ -203,16 +214,19 @@ export class GestureMachine {
 
     switch (s.k) {
       case "press": {
-        const slop = s.hit.kind === "handle" ? HANDLE_SLOP : TAP_SLOP[s.type];
+        const slop = s.hit.kind === "handle" || s.hit.kind === "grip" ? HANDLE_SLOP[s.type] : TAP_SLOP[s.type];
         if (dist(pt, s.start) < slop) return true;
         this.clearHold(s);
         this.lastTap = null;
-        if (s.hit.kind === "handle") this.startResize(s, s.hit.id, s.hit.dir, pt);
+        const h = s.hit;
+        if (h.kind === "handle") this.startResize(s, h.id, h.dir, pt);
         else if (this.host.mode() === "add" && isOnPage(this.host.view(), this.host.page(), s.start)) {
           this.s = { k: "add", pid: s.pid, start: s.start, r: 0 };
           this.host.activity("add");
           this.addTo(this.s, pt);
-        } else if (s.hit.kind === "circle" && s.hit.selected && this.host.mode() === "move") this.startMove(s, s.hit.id, pt);
+        } else if (this.host.mode() === "move" && (h.kind === "grip" || (h.kind === "circle" && h.grab))) this.startMove(s, h.id, pt);
+        // Everything else pans — including a big selected circle's body, so
+        // there's always somewhere to grab the blueprint.
         else this.startPan(s.pid, s.start, pt);
         return true;
       }
@@ -325,14 +339,31 @@ export class GestureMachine {
     return out;
   }
 
+  /**
+   * A pointer whose pointerup never came. Whatever it was doing ended when
+   * the finger lifted, so a move or resize is kept (like reset()), not
+   * cancelled: the owner saw it land and already let go.
+   */
   private forget(id: number) {
     const s = this.s;
     const involved = (s.k === "pinch" && (s.a === id || s.b === id)) || ("pid" in s && s.pid === id);
     this.pointers.delete(id);
-    if (involved) {
-      this.abortSingle();
-      this.s = { k: "idle" };
+    if (!involved) return;
+    switch (s.k) {
+      case "press":
+        this.clearHold(s);
+        break;
+      case "move":
+      case "resize":
+        this.host.draft(null);
+        this.host.gesture({ phase: "end", id: s.id, kind: s.k, ...(s.k === "move" ? { x: s.cur.x, y: s.cur.y } : { r: s.cur.r }) });
+        break;
+      case "add":
+        this.host.addPreview(null);
+        break;
     }
+    this.lastTap = null;
+    this.toIdle();
   }
 
   private toIdle() {
@@ -479,17 +510,21 @@ export class GestureMachine {
     const now = this.clock.now();
     if (now - s.t0 > TAP_MAX_MS) return;
     const how = s.type === "mouse" ? "click" : "tap";
-    if (s.hit.kind === "handle") return; // already selected; nothing to do
+    const h = s.hit;
+    if (h.kind === "handle") return; // already selected; nothing to do
     if (this.host.mode() === "add") {
       this.addAt(s.start, null, "tap");
       return;
     }
-    if (s.hit.kind === "circle") {
+    const id = h.kind === "paper" ? null : h.id;
+    // Paper and the already-selected circle's body can be double-tapped to
+    // zoom (a big selected circle may be all there is on screen). A tap on
+    // another circle just selects it.
+    if (h.kind === "grip" || (h.kind === "circle" && !h.selected)) {
       this.lastTap = null;
-      this.host.select(s.hit.id, how);
+      this.host.select(id, how);
       return;
     }
-    // paper (or the canvas around it): maybe the second tap of a double-tap
     const lt = this.lastTap;
     if (lt && lt.type === s.type && s.t0 - lt.t <= DOUBLE_TAP_MS && dist(lt, s.start) <= DOUBLE_TAP_DIST[s.type]) {
       this.lastTap = null;
@@ -498,6 +533,6 @@ export class GestureMachine {
     }
     // Select/deselect fires now; a second tap only adds the zoom.
     this.lastTap = { t: now, x: upAt.x, y: upAt.y, type: s.type };
-    this.host.select(null, how);
+    this.host.select(id, how);
   }
 }

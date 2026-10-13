@@ -1243,7 +1243,7 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
 
     renamePage(id, label) {
       if (!loaded) return;
-      batch(() => commit([patchRow("page", id, { label })]));
+      batch(() => commit([patchRow("page", id, { label })], `label:${id}`)); // typing a label is one undo step
     },
 
     movePage(id, toIndex) {
@@ -1280,7 +1280,7 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
 
     renamePlan(name) {
       if (!loaded) return;
-      batch(() => commit([patchRow("plan", planId, { name })]));
+      batch(() => commit([patchRow("plan", planId, { name })], "plan-name")); // typing the name is one undo step
     },
 
     mergePages(pages) {

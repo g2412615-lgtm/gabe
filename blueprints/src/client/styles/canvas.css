@@ -146,19 +146,38 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* selected: dashed outer ring + four resize handles (screen px) */
+/* selected: dashed outer ring + four resize handles + the move grip (screen px) */
 .bp-sel-ring {
   fill: none;
   stroke-width: 1.5px;
   stroke-dasharray: 5 4;
 }
-.bp-handle-hit {
+.bp-handle-hit,
+.bp-grip-hit {
   fill: transparent;
+}
+/* ties a handle that a small circle pushed out back to its ring */
+.bp-handle-stalk {
+  stroke-width: 1.5px;
+  stroke-linecap: round;
 }
 .bp-handle-dot {
   fill: #fff;
   stroke-width: 2px;
   filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.35));
+}
+/* the grip: a chip in the circle's colour (like its number badge) with four arrows — "drag me to move it" */
+.bp-grip-chip {
+  stroke: #fff;
+  stroke-width: 1.5px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+.bp-grip-glyph {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.7px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* add mode: the circle being dragged out */
@@ -210,7 +229,9 @@
   border-radius: var(--r-md);
   box-shadow: var(--shadow-2);
   touch-action: manipulation;
-  transition: right var(--t-base) var(--ease);
+  transition:
+    right var(--t-base) var(--ease),
+    bottom var(--t-base) var(--ease);
 }
 .bp-zoom-btn {
   width: 28px;

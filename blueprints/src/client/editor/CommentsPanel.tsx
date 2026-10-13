@@ -15,9 +15,14 @@ import { useCoarsePointer } from "../ui/media";
 import { usePlanState, type PlanStore } from "../sync";
 import AutoTextarea from "./AutoTextarea";
 import { deleteCircleWithUndo, deleteCommentWithUndo } from "./actions";
+import { draftIsLive, editComment, finishDraft, leaveDraft, settleCommentEdit, typeDraft } from "./commentDrafts";
 import { circleName, commentTime, isMac, radiusToSlider, SIZE_STEPS, sliderToRadius, wasEdited } from "./format";
+import { holdsTyping } from "./panelLogic";
 
 const NO_COMMENTS: CommentRow[] = [];
+
+/** The panel's text fields that can hold it still while typing. */
+export type TypingField = "title" | "composer";
 
 export interface CommentsPanelProps {
   store: PlanStore;
@@ -27,15 +32,19 @@ export interface CommentsPanelProps {
   onEditingChange(id: string | null): void;
   /** Close the panel (deselect). */
   onClose(): void;
-  /** The composer holds text: the panel must not switch to a hovered circle. */
-  onDraftingChange(drafting: boolean): void;
+  /**
+   * A focused field holds typing (the circle's name, or the composer): the
+   * panel must not switch to a hovered circle meanwhile. Each field reports
+   * for itself, and false when it goes away.
+   */
+  onTypingChange(field: TypingField, typing: boolean): void;
   /** Asked once on mount: should the composer take focus (a circle was just added with a mouse)? */
   takeComposerFocus(circleId: string): boolean;
   /** False while the whole editor is unmounting (the store is going away: no more edits). */
   editorAlive(): boolean;
 }
 
-function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onDraftingChange, takeComposerFocus, editorAlive }: CommentsPanelProps) {
+function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onTypingChange, takeComposerFocus, editorAlive }: CommentsPanelProps) {
   const comments = usePlanState(store, (s) => s.commentsByCircle.get(circle.id) ?? NO_COMMENTS);
   // the comment being written in the composer: it exists already, but shows in the list only once it's finished
   const [draftId, setDraftId] = useState<string | null>(null);
@@ -61,7 +70,7 @@ function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onD
       </div>
 
       <div className="cp-scroll" ref={listRef}>
-        <TitleField store={store} circle={circle} />
+        <TitleField store={store} circle={circle} onTypingChange={onTypingChange} />
 
         <div className="cp-look">
           <div className="cp-swatches" role="group" aria-label="Colour">
@@ -76,7 +85,8 @@ function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onD
                   aria-pressed={on}
                   aria-label={p.label}
                   title={p.label}
-                  onClick={() => store.updateCircle(circle.id, { color: c })}
+                  // never part of a size drag that may still be open: its own step, saved now
+                  onClick={() => store.updateCircle(circle.id, { color: c }, { live: false })}
                 >
                   <span style={{ background: p.fill, borderColor: p.stroke }} />
                 </button>
@@ -117,7 +127,7 @@ function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onD
         circleId={circle.id}
         draftId={draftId}
         setDraftId={setDraftId}
-        onDraftingChange={onDraftingChange}
+        onTypingChange={onTypingChange}
         takeFocus={takeComposerFocus}
         editorAlive={editorAlive}
         onFinished={scrollToEnd}
@@ -141,15 +151,24 @@ export default memo(CommentsPanel);
  * one undo step). Enter finishes; Escape puts back what was there when the
  * field took focus.
  */
-function TitleField({ store, circle }: { store: PlanStore; circle: CircleRow }) {
+function TitleField({ store, circle, onTypingChange }: { store: PlanStore; circle: CircleRow; onTypingChange(field: TypingField, typing: boolean): void }) {
   const [draft, setDraft] = useState(circle.title);
-  const focused = useRef(false);
+  const [focused, setFocused] = useState(false);
+  const focusedRef = useRef(false);
   const original = useRef(circle.title);
 
   // follow changes from elsewhere (undo, the other device) unless typing here
   useEffect(() => {
-    if (!focused.current) setDraft(circle.title);
+    if (!focusedRef.current) setDraft(circle.title);
   }, [circle.title]);
+
+  // a name being typed holds the panel still; an empty, merely focused field doesn't
+  const typing = holdsTyping(focused, draft);
+  useEffect(() => onTypingChange("title", typing), [typing, onTypingChange]);
+  useEffect(() => () => onTypingChange("title", false), [onTypingChange]);
+
+  // { live: false }: a name is its own undo step, saved now — never folded into a size drag
+  const save = (title: string) => store.updateCircle(circle.id, { title }, { live: false });
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.nativeEvent.isComposing) {
@@ -158,7 +177,7 @@ function TitleField({ store, circle }: { store: PlanStore; circle: CircleRow }) 
     } else if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      store.updateCircle(circle.id, { title: original.current });
+      save(original.current);
       setDraft(original.current);
       e.currentTarget.blur();
     }
@@ -175,16 +194,18 @@ function TitleField({ store, circle }: { store: PlanStore; circle: CircleRow }) 
       autoComplete="off"
       enterKeyHint="done"
       onFocus={() => {
-        focused.current = true;
+        focusedRef.current = true;
+        setFocused(true);
         original.current = circle.title;
       }}
       onBlur={() => {
-        focused.current = false;
+        focusedRef.current = false;
+        setFocused(false);
         setDraft(store.getState().circleById.get(circle.id)?.title ?? draft);
       }}
       onChange={(e) => {
         setDraft(e.target.value);
-        store.updateCircle(circle.id, { title: e.target.value });
+        save(e.target.value);
       }}
       onKeyDown={onKeyDown}
     />
@@ -196,23 +217,35 @@ function TitleField({ store, circle }: { store: PlanStore; circle: CircleRow }) 
 /**
  * Log-scale radius slider. A drag is one gesture (live updates, one undo
  * step); each arrow-key press is its own step (input + change per press).
+ *
+ * The gesture opens on the first value change, not on pointerdown — a tap
+ * that doesn't move the thumb fires no "change", and Safari doesn't focus
+ * a range input, so nothing would close it. It closes on whichever comes
+ * first: release (anywhere), cancel, lost capture, change, key up, blur,
+ * unmount. While a gesture is open the store holds edits back from saving,
+ * so one must never be left open.
  */
 function SizeSlider({ store, circle }: { store: PlanStore; circle: CircleRow }) {
   const ref = useRef<HTMLInputElement>(null);
   const active = useRef(false);
 
-  const begin = useCallback(() => {
-    if (active.current) return;
-    active.current = true;
-    store.beginGesture();
-  }, [store]);
   const end = useCallback(() => {
     if (!active.current) return;
     active.current = false;
+    window.removeEventListener("pointerup", end, true);
+    window.removeEventListener("pointercancel", end, true);
     store.endGesture();
   }, [store]);
+  const begin = useCallback(() => {
+    if (active.current) return;
+    active.current = true;
+    // the finger or mouse may come up off the slider: hear it wherever it does
+    window.addEventListener("pointerup", end, true);
+    window.addEventListener("pointercancel", end, true);
+    store.beginGesture();
+  }, [store, end]);
 
-  // the native change event marks the end of a drag (React's onChange is "input")
+  // the native change event marks the end of a drag or a key press (React's onChange is "input")
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -234,8 +267,10 @@ function SizeSlider({ store, circle }: { store: PlanStore; circle: CircleRow }) 
         step={1}
         value={radiusToSlider(circle.r)}
         aria-label="Circle size"
-        onPointerDown={begin}
+        onPointerUp={end}
         onPointerCancel={end}
+        onLostPointerCapture={end}
+        onKeyUp={end}
         onBlur={end}
         onChange={(e) => {
           begin();
@@ -273,13 +308,15 @@ const CommentItem = memo(function CommentItem({ store, comment, onEdit }: { stor
 
 /**
  * Inline editing of a comment: saved as it's typed. Done (or Esc, or
- * ⌘/Ctrl+Enter) closes it; a comment emptied out is deleted (with Undo).
+ * ⌘/Ctrl+Enter) closes it; a comment emptied out is deleted (with Undo),
+ * keeping the words it had before this edit for that Undo.
  */
 function CommentEditor({ store, comment, onDone, editorAlive }: { store: PlanStore; comment: CommentRow; onDone: () => void; editorAlive: () => boolean }) {
   const [text, setText] = useState(comment.body);
   const ref = useRef<HTMLTextAreaElement>(null);
   const textRef = useRef(text);
   textRef.current = text;
+  const original = useRef(comment.body);
   const finished = useRef(false);
 
   useLayoutEffect(() => {
@@ -293,9 +330,7 @@ function CommentEditor({ store, comment, onDone, editorAlive }: { store: PlanSto
   const settle = useCallback(() => {
     if (finished.current) return;
     finished.current = true;
-    const t = textRef.current.trim();
-    if (!t) deleteCommentWithUndo(store, comment.id);
-    else if (t !== textRef.current) store.updateComment(comment.id, t);
+    settleCommentEdit(store, comment.id, original.current, textRef.current);
   }, [store, comment.id]);
 
   // Closed some other way (another circle opened): settle it then — unless the editor itself is going away.
@@ -318,7 +353,7 @@ function CommentEditor({ store, comment, onDone, editorAlive }: { store: PlanSto
         aria-label="Edit comment"
         onChange={(e) => {
           setText(e.target.value);
-          store.updateComment(comment.id, e.target.value);
+          editComment(store, comment.id, e.target.value);
         }}
         onKeyDown={(e) => {
           if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) {
@@ -329,7 +364,7 @@ function CommentEditor({ store, comment, onDone, editorAlive }: { store: PlanSto
         }}
       />
       <div className="cp-edit-foot">
-        <span className="cp-note">Saved as you type</span>
+        <span className="cp-note">{text.trim() ? "Saved as you type" : "Empty — closing this deletes the comment"}</span>
         <button type="button" className="small primary" onClick={done}>
           Done
         </button>
@@ -344,14 +379,16 @@ function CommentEditor({ store, comment, onDone, editorAlive }: { store: PlanSto
  * "Add a comment…": the first non-blank character creates the comment,
  * further typing updates it, erasing it all deletes it again. Add (or
  * ⌘/Ctrl+Enter) finishes it: the composer clears and the comment joins the
- * list. Leaving with text keeps the comment — it already exists.
+ * list. Leaving with text keeps the comment — it already exists. If the
+ * draft goes away meanwhile (an Undo, the other device), the composer
+ * starts over: it never shows text that isn't saved.
  */
 function Composer({
   store,
   circleId,
   draftId,
   setDraftId,
-  onDraftingChange,
+  onTypingChange,
   takeFocus,
   editorAlive,
   onFinished,
@@ -360,19 +397,19 @@ function Composer({
   circleId: string;
   draftId: string | null;
   setDraftId: (id: string | null) => void;
-  onDraftingChange: (drafting: boolean) => void;
+  onTypingChange: (field: TypingField, typing: boolean) => void;
   takeFocus: (circleId: string) => boolean;
   editorAlive: () => boolean;
   onFinished: () => void;
 }) {
   const [text, setText] = useState("");
+  const [focused, setFocused] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const coarse = useCoarsePointer();
-  const isLive = useCallback((id: string) => store.getState().commentsByCircle.get(circleId)?.some((c) => c.id === id) ?? false, [store, circleId]);
 
   // the latest values, for the unmount cleanup (which must run on unmount only)
-  const live = useRef({ text, draftId, isLive, editorAlive, onDraftingChange });
-  live.current = { text, draftId, isLive, editorAlive, onDraftingChange };
+  const live = useRef({ text, draftId, editorAlive });
+  live.current = { text, draftId, editorAlive };
 
   useEffect(() => {
     if (takeFocus(circleId)) ref.current?.focus({ preventScroll: true });
@@ -380,40 +417,38 @@ function Composer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Typing holds the panel still; the empty composer with focus (after an add) doesn't.
+  const typing = holdsTyping(focused, text);
+  useEffect(() => onTypingChange("composer", typing), [typing, onTypingChange]);
+
+  // The draft went away under the composer (an Undo took it, or it was
+  // deleted on the other device): start over — the text isn't saved any more.
+  const draftLive = usePlanState(store, (s) => draftIsLive(s, circleId, draftId));
+  useEffect(() => {
+    if (!draftId || draftLive) return;
+    setDraftId(null);
+    setText("");
+  }, [draftId, draftLive, setDraftId]);
+
   // Leaving this circle with a draft: it's already saved; just tidy its ends.
   useEffect(
     () => () => {
       const l = live.current;
-      const t = l.text.trim();
-      if (l.draftId && l.editorAlive() && t && t !== l.text && l.isLive(l.draftId)) store.updateComment(l.draftId, t);
-      l.onDraftingChange(false);
+      if (l.editorAlive()) leaveDraft(store, circleId, l.draftId, l.text);
+      onTypingChange("composer", false);
     },
-    [store],
+    [store, circleId, onTypingChange],
   );
 
   const onChange = (value: string) => {
     setText(value);
-    const blank = value.trim() === "";
-    const id = draftId && isLive(draftId) ? draftId : null; // an Undo may have taken the draft away
-    if (id) {
-      if (blank) {
-        store.deleteComment(id);
-        setDraftId(null);
-      } else store.updateComment(id, value);
-    } else if (!blank) setDraftId(store.addComment(circleId, value));
-    else if (draftId) setDraftId(null);
-    onDraftingChange(!blank);
+    setDraftId(typeDraft(store, circleId, draftId, value));
   };
 
   const finish = () => {
-    const t = text.trim();
-    if (!t) return;
-    if (draftId && isLive(draftId)) {
-      if (t !== text) store.updateComment(draftId, t);
-    } else store.addComment(circleId, t);
+    if (!finishDraft(store, circleId, draftId, text)) return;
     setDraftId(null);
     setText("");
-    onDraftingChange(false);
     onFinished();
     // With a keyboard, stay ready for the next one. On a touch screen let the
     // on-screen keyboard go (iPad Safari keeps focus in the field after a
@@ -433,6 +468,8 @@ function Composer({
         maxLength={MAX_COMMENT_CHARS}
         minRows={2}
         maxRows={8}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {

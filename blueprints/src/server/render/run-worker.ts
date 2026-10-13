@@ -99,7 +99,8 @@ export function runWorker(task: WorkerTask, opts: { timeoutMs: number; onMessage
   // so every message it sent has been seen by then.
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null; error?: Error }>((resolve) => {
     child.once("close", (code, signal) => resolve({ code, signal }));
-    child.once("error", (error) => {
+    // always listened to: an unhandled 'error' would take the server down
+    child.on("error", (error) => {
       // spawning failed (no process, so no 'close'); later errors (a failed kill) are followed by 'close'
       if (child.pid === undefined) resolve({ code: null, signal: null, error });
     });

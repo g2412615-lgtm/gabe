@@ -1,6 +1,7 @@
 // The blueprint canvas (SPEC §7.5): pan/zoom a page, see and edit its
 // circles. Touch is first-class: one finger pans, two fingers pinch and pan,
-// tap selects, long-press adds, handles resize, the selected circle drags.
+// tap selects, long-press adds, handles resize, the selected circle's grip
+// (or the whole circle, while it's small) drags it.
 //
 //   .bp-canvas            fills the stage (the stage must be position: relative)
 //     .bp-surface         every gesture lands here; children take no pointer events
@@ -26,14 +27,17 @@ import { scaleLimits } from "./viewMath";
 export type { BlueprintCanvasProps, CanvasGestureEvent, CanvasHandle, CanvasMode } from "./types";
 
 const BlueprintCanvas = forwardRef<CanvasHandle, BlueprintCanvasProps>(function BlueprintCanvas(props, ref) {
-  const { page, circles, selectedId, litId, mode, topInset = 0, rightInset = 0, onCancelAdd } = props;
+  const { page, circles, selectedId, litId, mode, topInset = 0, rightInset = 0, bottomInset = 0, onCancelAdd } = props;
 
   const ctlRef = useRef<CanvasController | null>(null);
   if (!ctlRef.current) ctlRef.current = new CanvasController(props);
   const ctl = ctlRef.current;
+  // Handles sit further out on a touch screen; drawing and hit testing must agree.
+  const coarse = useMediaQuery("(pointer: coarse)");
 
   // Handlers read the latest props through the controller.
   useLayoutEffect(() => {
+    ctl.setCoarse(coarse);
     ctl.setProps(props);
   });
 
@@ -50,7 +54,6 @@ const BlueprintCanvas = forwardRef<CanvasHandle, BlueprintCanvasProps>(function 
   useImperativeHandle(ref, () => ctl.handle, [ctl]);
 
   const snap = useSyncExternalStore(ctl.subscribe, ctl.getSnapshot, ctl.getSnapshot);
-  const coarse = useMediaQuery("(pointer: coarse)");
   const { view, size, ready } = snap;
   const drawable = ready && page.width > 0 && page.height > 0;
 
@@ -63,7 +66,7 @@ const BlueprintCanvas = forwardRef<CanvasHandle, BlueprintCanvasProps>(function 
       <div ref={surfaceRef} className="bp-surface">
         {drawable && (
           <>
-            <RasterLayer page={page} view={view} size={size} />
+            <RasterLayer page={page} view={view} size={size} zooming={snap.zooming} />
             <AnnotationLayer
               page={page}
               circles={circles}
@@ -75,6 +78,7 @@ const BlueprintCanvas = forwardRef<CanvasHandle, BlueprintCanvasProps>(function 
               draft={snap.draft}
               addPreview={snap.addPreview}
               coarse={coarse}
+              mode={mode}
             />
             {snap.holds.map((h) => (
               <div key={h.id} className="bp-hold" style={{ left: h.x, top: h.y }} aria-hidden="true" />
@@ -89,6 +93,7 @@ const BlueprintCanvas = forwardRef<CanvasHandle, BlueprintCanvasProps>(function 
           canZoomIn={view.scale < limits.max * 0.999}
           canZoomOut={view.scale > limits.min * 1.001}
           rightInset={rightInset}
+          bottomInset={bottomInset}
           onZoomIn={ctl.handle.zoomIn}
           onZoomOut={ctl.handle.zoomOut}
           onFit={ctl.handle.fit}

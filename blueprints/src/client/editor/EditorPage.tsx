@@ -10,11 +10,15 @@
 // is open, which circle is selected or hovered, the tool, the sidebar.
 //
 // The comments panel follows the pointer on a desktop: it shows a hovered
-// circle (unless the owner is busy in the panel) and falls back to the
+// circle (unless the owner is typing in the panel) and falls back to the
 // selected one 700 ms after the hover ends. Moving into the panel keeps the
 // hovered circle — for good once the owner does something there.
+//
+// The panel floats over the blueprint, so a circle that gets selected (or
+// hovered) under it is panned out from under it — once, when the panel
+// starts showing it.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type PointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { APP_NAME } from "../../shared/constants";
 import type { View } from "../../shared/geometry";
 import type { CircleRow, PageRow } from "../../shared/types";
@@ -23,10 +27,11 @@ import { setToastOffset } from "../ui/notify";
 import { useMediaQuery } from "../ui/media";
 import { createPlanStore, usePlanState } from "../sync";
 import BlueprintCanvas, { type CanvasGestureEvent, type CanvasHandle, type CanvasMode } from "./canvas/BlueprintCanvas";
-import { deleteCircleWithUndo, retryPage } from "./actions";
-import CommentsPanel from "./CommentsPanel";
+import { deleteCircleWithUndo, registerEditorStore, retryPage } from "./actions";
+import CommentsPanel, { type TypingField } from "./CommentsPanel";
 import EditorHeader from "./EditorHeader";
 import PageSidebar, { type SidebarTab } from "./PageSidebar";
+import { panelBusy, underCover } from "./panelLogic";
 import { PREF_LEFT_COLLAPSED, readPref, writePref } from "./prefs";
 import { EditorLoading, EditorMessage, FailedCard, NoPagesCard, PreparingCard } from "./StageStates";
 import { useAddPages } from "./useAddPages";
@@ -40,6 +45,8 @@ export interface EditorPageProps {
 
 /** Width of the floating comments panel (keep in step with editor.css). */
 const PANEL_W = 340;
+/** The phone's bottom sheet: this share of the stage's height (keep in step with editor.css). */
+const SHEET_SHARE = 0.6;
 /** How long the panel keeps showing a circle after the pointer leaves it. */
 const HOVER_LINGER_MS = 700;
 /** The panel's slide-out, before its content goes. */
@@ -57,9 +64,14 @@ const preparing = (p: PageRow) => p.status === "queued" || p.status === "renderi
 export default function EditorPage({ planId, initialPageId, initialCircleId }: EditorPageProps) {
   const store = useMemo(() => createPlanStore(planId), [planId]);
   useEffect(() => {
+    // registered: a delete toast's Undo, pressed after leaving, knows this store is closed
+    const unregister = registerEditorStore(planId, store);
     void store.load();
-    return () => store.dispose();
-  }, [store]);
+    return () => {
+      unregister();
+      store.dispose();
+    };
+  }, [store, planId]);
 
   // Cleared in the layout phase of unmounting, before any passive cleanup
   // (the store's dispose, a closing comment draft): child components ask
@@ -101,12 +113,16 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   const narrow = useMediaQuery("(max-width: 899px)");
   const sheet = useMediaQuery("(max-width: 699px)");
 
-  // what makes the panel "busy" (it then ignores hover)
-  const [typingInPanel, setTypingInPanel] = useState(false);
+  // what makes the panel "busy" (it then ignores hover): see panelBusy
+  const [typing, setTyping] = useState<Record<TypingField, boolean>>({ title: false, composer: false });
   const [pointerInPanel, setPointerInPanel] = useState(false);
-  const [drafting, setDrafting] = useState(false);
+  const onTypingChange = useCallback((field: TypingField, on: boolean) => {
+    setTyping((t) => (t[field] === on ? t : { ...t, [field]: on }));
+  }, []);
 
   const canvasRef = useRef<CanvasHandle>(null);
+  const [stageEl, setStageEl] = useState<HTMLElement | null>(null);
+  const stageSize = useElementSize(stageEl);
   const views = useRef(new Map<string, View>());
   /** Zoom to this circle once its page's canvas is up. */
   const pendingFocus = useRef<{ pageId: string; circleId: string } | null>(null);
@@ -165,7 +181,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   const selected = (selectedId && circleById.get(selectedId)) || null;
   const hovered = (hoverId && circleById.get(hoverId)) || null;
   const open0 = !!(selected || hovered);
-  const busy = open0 && (typingInPanel || pointerInPanel || drafting);
+  const busy = open0 && panelBusy({ pointerInPanel, editing: editingId !== null, typing: typing.title || typing.composer });
   const shown: CircleRow | null = (!busy && hovered && hovered.pageId === pageId ? hovered : null) ?? selected;
   const shownId = shown?.id ?? null;
 
@@ -187,27 +203,39 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   const panelOpen = !!shown;
 
   // A different circle in the panel (or none) closes any comment being
-  // edited, and re-reads where focus and the pointer are: a focused field
-  // that's removed from the page doesn't always report its blur.
-  const asideRef = useRef<HTMLElement>(null);
+  // edited. (The fields report their own typing, also when they go away.)
   useEffect(() => {
     setEditingId(null);
-    const a = document.activeElement;
-    setTypingInPanel(!!shownId && !!asideRef.current?.contains(a) && isTextField(a));
     if (!shownId) setPointerInPanel(false);
   }, [shownId]);
 
-  // The panel floats over the blueprint: fit/zoom and the zoom buttons keep
-  // clear of it, and so do the toasts.
+  // The panel floats over the blueprint: fit, focus, reveal and the zoom
+  // buttons keep clear of it — at the right on a desktop or iPad, at the
+  // bottom on a phone — and so do the toasts.
   const rightInset = panelOpen && !sheet ? PANEL_W : 0;
+  const bottomInset = panelOpen && sheet ? Math.round(stageSize.h * SHEET_SHARE) : 0;
   const coarse = useMediaQuery("(pointer: coarse)");
   useEffect(() => {
     // above the zoom bar (bottom right of the stage), and left of the panel when it's out
     const bottom = coarse ? ZOOM_CLEAR.touch : ZOOM_CLEAR.mouse;
-    if (panelOpen && sheet) setToastOffset({ bottom: Math.round(window.innerHeight * 0.6) + 12 });
+    if (panelOpen && sheet) setToastOffset({ bottom: bottomInset + 12 });
     else setToastOffset({ right: panelOpen ? PANEL_W + 20 : 20, bottom });
-  }, [panelOpen, sheet, coarse]);
+  }, [panelOpen, sheet, coarse, bottomInset]);
   useEffect(() => () => setToastOffset(null), []);
+
+  // A hovered circle the panel has just slid in over: pan it out from under
+  // the panel — once per showing, never chasing the pointer. (A circle that's
+  // tapped, clicked or added is revealed where that happens.)
+  const hoverShownId = panelOpen && shownId !== selectedId && shownId === hoverId ? shownId : null;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const c = hoverShownId ? store.getState().circleById.get(hoverShownId) : undefined;
+    if (!canvas || !c || !page || c.pageId !== page.id || !stageEl) return;
+    const size = { w: stageEl.clientWidth, h: stageEl.clientHeight };
+    if (underCover(c, page, canvas.getView(), size, { right: rightInset, bottom: bottomInset })) canvas.revealCircle(c.id);
+    // keyed on the circle alone: once per showing
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoverShownId]);
 
   // ── canvas callbacks (stable: the canvas is memoized) ────────────────
   const pageIdRef = useRef(pageId);
@@ -226,6 +254,8 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   const onSelect = useCallback((id: string | null) => {
     tentativePin.current = null;
     setSelectedId(id);
+    // the panel opens for it: don't let it open on top of the circle
+    if (id) canvasRef.current?.revealCircle(id);
   }, []);
 
   const onAdd = useCallback(
@@ -237,6 +267,8 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
       setSelectedId(id);
       setHoverId(null);
       setMode("move");
+      // the new circle, its handles and the size slider must all be in view together
+      canvasRef.current?.revealCircle(id);
       // with a mouse the keyboard is right there: start the first comment
       if (lastPointer.current === "mouse") composerFocusFor.current = id;
     },
@@ -369,14 +401,6 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   };
   const confirmPin = () => {
     tentativePin.current = null;
-  };
-  const onPanelFocus = (e: FocusEvent) => {
-    confirmPin();
-    setTypingInPanel(isTextField(e.target));
-  };
-  const onPanelBlur = (e: FocusEvent<HTMLElement>) => {
-    const next = e.relatedTarget as Node | null;
-    if (!next || !e.currentTarget.contains(next)) setTypingInPanel(false);
   };
 
   const closePanel = useCallback(() => {
@@ -520,6 +544,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
         onGesture={onGesture}
         onCancelAdd={cancelAdd}
         rightInset={rightInset}
+        bottomInset={bottomInset}
       />
     );
 
@@ -574,6 +599,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
         {narrow && <div className={`ed-scrim${drawerOpen ? " on" : ""}`} onClick={() => setDrawerOpen(false)} aria-hidden="true" />}
 
         <main
+          ref={setStageEl}
           className={`ed-stage${panelOpen ? " panel-open" : ""}`}
           onPointerDownCapture={(e) => {
             lastPointer.current = e.pointerType;
@@ -582,7 +608,6 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
           {stage}
 
           <aside
-            ref={asideRef}
             className={`ed-right${panelOpen ? " open" : ""}${sheet ? " sheet" : ""}`}
             aria-label={panelCircle ? "Circle comments" : undefined}
             aria-hidden={panelOpen ? undefined : true}
@@ -591,8 +616,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
             onPointerLeave={onPanelPointerLeave}
             onPointerDown={confirmPin}
             onKeyDown={confirmPin}
-            onFocus={onPanelFocus}
-            onBlur={onPanelBlur}
+            onFocus={confirmPin}
           >
             {panelCircle && (
               <CommentsPanel
@@ -602,7 +626,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
                 editingId={editingId}
                 onEditingChange={setEditingId}
                 onClose={closePanel}
-                onDraftingChange={setDrafting}
+                onTypingChange={onTypingChange}
                 takeComposerFocus={takeComposerFocus}
                 editorAlive={editorAlive}
               />
@@ -614,7 +638,17 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   );
 }
 
-/** A field the owner types in (the panel then holds still while the pointer wanders). */
-function isTextField(t: EventTarget | null): boolean {
-  return t instanceof HTMLTextAreaElement || (t instanceof HTMLInputElement && t.type === "text");
+/** An element's size in px, kept current (the stage: the phone sheet's height, what the panel covers). */
+function useElementSize(el: HTMLElement | null): { w: number; h: number } {
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  useLayoutEffect(() => {
+    if (!el) return;
+    const read = () => setSize((s) => (s.w === el.clientWidth && s.h === el.clientHeight ? s : { w: el.clientWidth, h: el.clientHeight }));
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+  return size;
 }

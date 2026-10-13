@@ -5,6 +5,9 @@
 # Action do it): fly deploy -a gabeweb-blueprints --remote-only --ha=false
 app = "gabeweb-blueprints"
 primary_region = "dfw"
+# give a page that's being prepared up to 10 s to finish when a deploy
+# restarts the machine (a cut-off render is simply redone, never lost)
+kill_timeout = 15
 
 [build]
 

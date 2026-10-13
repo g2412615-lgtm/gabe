@@ -12,24 +12,19 @@ before writing code. When this spec and your instincts disagree, follow the
 spec; when the spec is silent, follow DeployMap's conventions
 (reference reports below) and write the simplest robust thing.
 
-## 0. Reference material (read these)
+## 0. Reference material
 
-The DeployMap source is at `/home/user/deploymap` (read-only; never modify it).
-Five study reports of it are in
-`/tmp/claude-0/-home-user-gabe/b9496519-f5d4-5ac4-bc13-0024a619e7b5/scratchpad/`:
-
-| File | What's in it |
-|---|---|
-| `report-design.md` | Design tokens (copy the `:root` block verbatim), every UI primitive's effective CSS, icons, home page and editor chrome structure, copy tone. **The visual source of truth.** |
-| `report-canvas.md` | DeployMap's pan/zoom math (copy it), and a recommended multi-pointer gesture state machine for iPad (pinch, pan, tap vs drag, Safari gesture events, rAF batching). |
-| `report-pdf.md` | mupdf rendering code and measurements, upload validation (byte sniffing), storage and file-serving patterns. |
-| `report-infra.md` | Auth/session code (HMAC cookie, scrypt), Fly.io hosting patterns, backups. |
-| `report-state.md` | Autosave/sync engine patterns, iPad pitfalls (no beforeunload, blur unreliable, keepalive), save-status UX, comments UI notes. |
+The design reference is DeployMap, the owner's dot map app (private
+repository `g2412615-lgtm/deploymap`, read-only from here). Its effective
+design tokens and primitives were ported into `src/client/styles/` — treat
+those files as the visual source of truth for this app. DeployMap's
+`app/globals.css`, `components/editor/Canvas.tsx` and RUNBOOK.md are the
+places to look when a new screen needs a pattern this app doesn't have yet.
 
 ## 1. Stack and layout
 
 - Node 22 (`node:sqlite` built in — no native DB driver), TypeScript, ESM.
-- Server: Hono (`hono`, `@hono/node-server`), SQLite via `node:sqlite` `DatabaseSync`, `mupdf` (WASM) + `sharp` for rendering in a `worker_threads` worker.
+- Server: Hono (`hono`, `@hono/node-server`), SQLite via `node:sqlite` `DatabaseSync`, `mupdf` (WASM) + `sharp` for rendering in a separate child process per page.
 - Client: React 19 SPA built by Vite 7. No UI framework, no CSS framework, no state library. Plain CSS files using the DeployMap tokens.
 - Tests: Vitest (server + unit), Playwright (end-to-end, later).
 
@@ -159,18 +154,28 @@ server's.
 ## 5. Rendering pipeline (server)
 
 A persistent queue in the database: pages with `status = 'queued'`
-(and `'rendering'` found at boot → back to `'queued'`). Concurrency 1. For each
-page, spawn a **fresh worker thread** (`src/server/render/worker.ts`, so the
-mupdf WASM heap is released afterwards) with a timeout (default 180 s →
-`failed`, `"This page took too long to prepare."`). Worker steps:
+(and `'rendering'`/`'preview'` found at boot → back to `'queued'`), skipping
+pages whose page or plan is deleted. Concurrency 1. Each render (and each
+upload inspection) runs in its own **child process** (`child_process.fork` of
+`src/server/render/worker.ts`, bundled as `dist/server/render-worker.js`) whose
+`oom_score_adj` is 1000, so if a page needs more memory than the machine has,
+the kernel kills the renderer, never the server. A watchdog in the child exits
+it if the server dies. Every attempt is counted (`render_attempts`): a page
+whose render was killed or timed out twice is marked failed ("This page is too
+large or complex to prepare. Try exporting it as a smaller PDF.") and is never
+auto-retried at boot; Retry resets the count, and a graceful shutdown hands the
+attempt back. A timeout (default 180 s) SIGKILLs the child and removes its
+partial output. If the preview was already made, the page ends `ready` with no
+tiles (`maxLevel 0`) — viewable, just without deep zoom — instead of failing.
+Worker steps:
 
 1. Open the source. PDF: `mupdf.Document.openDocument(bytes, "application/pdf")`, `loadPage(i)`, bounds = `page.getBounds()` (CropBox, rotation applied). Image: `sharp(file).rotate()` (bake EXIF orientation) → raw RGB.
-2. Scale = `Math.min(300 / 72, 8000 / longSide)` for PDFs (DeployMap's proven numbers); images: cap the long side at 8000 px (downscale only).
+2. Scale = `Math.min(300 / 72, 8000 / longSide)` for PDFs (DeployMap's proven numbers), further reduced so the page is at most ~40 MP; images: same caps (downscale only).
 3. `page.toPixmap(Matrix.scale(s, s), ColorSpace.DeviceRGB, false, true)` → copy pixels out (`Buffer.from(pix.getPixels())`, check stride) → `destroy()` pixmap/page/doc.
 4. Write, under `DATA_DIR/assets/<pageId>/<assetKey>/` (write to a temp dir, then rename into place):
    - `preview.webp` — fit inside 2048×2048, quality 82. **Post a message right after this** so the main thread sets `status = 'preview'` with `width`, `height`, `previewW`, `previewH` (the page is viewable now).
    - `thumb.webp` — fit inside 480×480, quality 78.
-   - Tiles: `sharp(raw, { raw }).png({ palette: true, colors: 256, dither: 0.6 })` (PDFs) or `.jpeg({ quality: 86 })` (images) `.tile({ size: 512, overlap: 0, layout: "dz", depth: "onetile" }).toFile(<dir>/tiles.dz)`. Then move `tiles_files/<level>/` folders to `<dir>/tiles/<level>/` (served as `tiles/<level>/<col>_<row>.<ext>`), delete the `.dzi` and `vips-properties.xml`. Record `tileSize = 512`, `maxLevel` (the highest numbered folder; full resolution), `minLevel` (the lowest), `tileFormat`.
+   - Tiles: PNG for line art, JPEG q85 for scans/photos (PDF pages are sampled: JPEG when PNG would cost > 0.4 bytes/pixel and > 2× the JPEG size; image uploads are always JPEG) `.tile({ size: 512, overlap: 0, layout: "dz", depth: "onetile" }).toFile(<dir>/tiles.dz)`. Then move `tiles_files/<level>/` folders to `<dir>/tiles/<level>/` (served as `tiles/<level>/<col>_<row>.<ext>`), delete the `.dzi` and `vips-properties.xml`. Record `tileSize = 512`, `maxLevel` (the highest numbered folder; full resolution), `minLevel` (the lowest), `tileFormat`.
 5. Main thread sets `status = 'ready'` and the tile fields. On any error: `status = 'failed'`, `error` = a plain sentence, and log the technical error.
 
 Measured locally: an ARCH D (36×24 in) page renders in ~0.8 s and tiles in
@@ -183,7 +188,8 @@ re-render.
 ## 6. Server details
 
 - Config (env): `PORT` (8080), `DATA_DIR` (`./data`), `APP_PASSWORD` or `APP_PASSWORD_HASH` (scrypt format `scrypt:<salt b64url>:<hash b64url>` from `scripts/hash-password.mjs`), `SESSION_SECRET` (optional: if missing, generate 48 random bytes once and keep them in `DATA_DIR/.session-secret`, mode 600), `NODE_ENV`. In production with no password configured, every API answers 503 `"The app isn't set up yet: no password is configured."` (fail closed). `MAX_UPLOAD_MB` from constants.
-- Session cookie `bpn_session` = `v1.<expiresMs>.<hmacSHA256hex>`, HttpOnly, SameSite=Lax, Path=/, Secure when the request is HTTPS (check `x-forwarded-proto` too), lifetime 180 days (the iPad should stay signed in). Changing the password does not sign devices out unless SESSION_SECRET changes — fine.
+- Session cookie `bpn_session` = `v2.<issuedMs>.<expiresMs>.<hmacSHA256hex>`, HttpOnly, SameSite=Lax, Path=/, Secure when the request is HTTPS (check `x-forwarded-proto` too). Renewed about weekly while in use, never past one year from the original sign-in. The signing key mixes SESSION_SECRET with a fingerprint of the password config, so **changing the password signs every device out** (the way to cut off a lost iPad).
+- Free-space guard: uploads are refused (507, plain message) when they'd leave less than 256 MB free; renders fail with a storage message; `/api/health` reports `storage: "full"` with a 503.
 - Data layout: `DATA_DIR/app.db` (WAL mode, `foreign_keys = ON`, `busy_timeout`), `DATA_DIR/uploads/<sourceId>.<pdf|png|jpg>`, `DATA_DIR/assets/<pageId>/<assetKey>/…`, `DATA_DIR/tmp/`, `DATA_DIR/backups/`.
 - Migrations: `PRAGMA user_version`; an ordered array of SQL strings applied in a transaction at boot.
 - Indexes: pages(plan_id, sort_order), circles(plan_id), circles(page_id), comments(plan_id), comments(circle_id).
@@ -298,11 +304,11 @@ function usePlanState<T>(store: PlanStore, select: (s: PlanState) => T): T; // u
 Engine rules (see report-state.md §9 — follow it, with these decisions):
 
 - State: `doc` (the client's rows by kind+id, tombstones included) and `synced` (last known server copy per row). Pending = rows whose editable fields differ from `synced` (or with no `synced` entry). Ops are built by diffing; this naturally coalesces rapid edits.
-- Every local change: update `doc`, persist the **outbox** to localStorage synchronously (key `bpn-outbox:<planId>`, `{ v: 1, entries: { "<kind>:<id>": { local, base } } }`, only pending rows; wrapped in try/catch), bump `rev`, schedule a flush: 500 ms debounce, 2.5 s max wait.
+- Every local change: update `doc`, persist the **outbox** to localStorage synchronously (key `bpn-outbox:<planId>`, `{ v: 2, name, entries: { "<kind>:<id>": { local, base, sent? } } }` — `sent` holds the fields of a request that went out without a confirmed reply; only pending rows; read-modify-write so two stores never erase each other's entries; replies trim confirmed entries even after dispose; wrapped in try/catch), bump `rev`, schedule a flush: 500 ms debounce, 2.5 s max wait.
 - Flush: one request at a time (`api.sync`), ≤ 500 ops per request (loop for more), 15 s timeout (api.ts does it). On success, for each returned row R and what was sent S: `doc = merge3(kind, S, docCurrent, R)`, `synced = R` (so edits made while the request was out survive, and server-assigned `num` etc. arrive). Rejected ops: drop the local pending change for that row (adopt the server row if returned, else remove a never-created row) and set `save.message`. Network/5xx/timeout → state `offline`, retry with backoff 1, 2, 4, 8, 15, 30 s; `online` event retries immediately. 401 → `signedOut` (keep everything; retry after `api.me()` succeeds — poll every 10 s while signedOut). Other 4xx → `error` with the message (keep the outbox; tapping the pill retries).
 - `visibilitychange` → hidden and `pagehide`: flush with `keepalive: true` (request body < 60 KB; otherwise normal). → visible and `pageshow` with `persisted`: pull (GET plan) and rebase. Also pull every 30 s while the tab is visible and nothing is pending/in flight (picks up edits from the other device).
 - Rebase after a pull: for every server row R: if the client has no pending change for it → adopt R into `doc` and `synced`; else `doc = merge3(kind, synced_old, doc, R)`, `synced = R`. Rows only in `doc` (created offline) stay.
-- Load: GET plan; read the outbox; for each entry `{ local, base }`: if the server has the row: `doc = merge3(kind, base, local, server)`; else (a create that never reached the server) keep `local`; then flush. If the GET fails because of the network and an outbox exists, show `loadError` ("You're offline — this plan will open when the connection is back.") and retry every 5 s. If restored entries exist, `notify("<n> changes made on this device hadn't reached the server — saving them now.")` (defer with setTimeout 0).
+- Load: GET plan; read the outbox; restore each entry with `restoreRow` (outbox.ts): a field that never left the device wins; a field that went out without a reply comes back only if the server still holds its base value; a create that reached the server takes the server row as-is (so a circle deleted on the other device stays deleted); a create that never reached the server is kept; then flush. The home page also saves every stored outbox in the background (`startBackgroundSave`, 3 s after it opens, on `online` and on return to the app), skipping plans open in this tab. If the GET fails because of the network and an outbox exists, show `loadError` ("You're offline — this plan will open when the connection is back.") and retry every 5 s. If restored entries exist, `notify("<n> changes made on this device hadn't reached the server — saving them now.")` (defer with setTimeout 0).
 - Undo/redo: snapshot stacks of `doc` (max 100), cleared of nothing on save (saves don't affect undo). `undo` restores the previous snapshot's editable fields **for rows that changed** (keep server-owned fields current). Comment typing coalesces per comment id (a new undo step starts when a different comment/action happens or after 3 s idle). Live gesture updates (`opts.live` or between begin/endGesture) don't create steps; `endGesture` creates one step if anything changed (DeployMap's dragBase pattern, including keeping the base if a commit lands mid-gesture).
 - Derived state is recomputed only when `doc` changes (memoize; plans can have hundreds of circles).
 - `movePage`: sortOrder = midpoint of neighbours (first: first − 1; last: last + 1).
@@ -323,6 +329,7 @@ export type CanvasMode = "move" | "add";
 export interface CanvasHandle {
   zoomIn(): void; zoomOut(): void; fit(): void;
   focusCircle(id: string): void;               // pan/zoom so the circle is centred and comfortably sized
+  revealCircle(id: string): void;              // minimal animated pan so the circle (+ handles, badge, 24 px) is outside the insets; no zoom unless it can't fit
   getView(): View;
 }
 export interface BlueprintCanvasProps {
@@ -337,7 +344,7 @@ export interface BlueprintCanvasProps {
   onSelect(id: string | null, how: "tap" | "click"): void;          // tap/click on a circle (id) or empty paper (null)
   onAdd(c: { x: number; y: number; r: number }): void;             // normalized; the editor creates it
   onGesture(e: { phase: "start" | "update" | "end" | "cancel"; id: string; kind: "move" | "resize"; x?: number; y?: number; r?: number }): void;
-  topInset?: number; rightInset?: number; // px covered by floating UI (the right panel) — fit/focus keep content clear of it
+  topInset?: number; rightInset?: number; bottomInset?: number; // px covered by floating UI (the right panel / phone sheet) — focus/reveal keep content clear of it; inset changes never move the view by themselves
 }
 ```
 
@@ -352,7 +359,7 @@ Rendering:
 Gestures (implement the multi-pointer state machine from report-canvas.md §7.2–7.4; pointer events + pointer capture; always match `pointerId`; handle `pointercancel`/`lostpointercapture`):
 - Wheel / trackpad: zoom around the cursor like DeployMap (`exp(-delta * speed)`, ctrlKey pinch faster), native listener `{ passive: false }`. Safari `gesturestart/change/end` for Mac trackpad pinch (ignored while touch pointers are down).
 - One finger / left mouse drag on paper or on an **unselected** circle: pan. Slop 10 px touch, 4 px mouse/pen.
-- Drag on the **selected** circle's body: move it (`onGesture` move start/update/end with new x,y; clamp to the page).
+- A selected circle shows a **move grip** (✥ chip, constant size, 44 px touch target) at its centre: dragging it moves the circle. Dragging the selected circle's **body** moves it only while it's drawn at radius ≤ 90 px; a bigger circle's body pans like paper, so panning is never impossible. On small circles the resize handles sit outside the rim (≥ 46 px from the centre on touch). Handle/grip padding never steals a tap meant for another circle drawn there.
 - Drag a handle: resize (r = distance from centre to the pointer, clamped to MIN/MAX_CIRCLE_R).
 - Two fingers anywhere: pinch-zoom + pan together (anchor to the starting midpoint and starting view — no drift). A second finger cancels any single-finger move/resize in progress (`onGesture` cancel → the editor restores) and suppresses the pending tap. Lifting one finger hands over to a pan without a jump.
 - Tap (press + release within the slop, < 600 ms, single pointer): on a circle → `onSelect(id)`; on paper → `onSelect(null)`. Hit-test by math (world distance), smallest containing circle wins; handles of the selected circle first.
@@ -390,7 +397,7 @@ div.ed-body
 - **Stage**: if the current page is `queued`/`rendering` → centred placeholder card ("Preparing page… This takes a few seconds for big sheets." with spinner); `failed` → message + Retry; no pages → empty state with "Add pages" (Dropzone). Otherwise `BlueprintCanvas`. Remember each page's last view in memory (Map pageId → View) and pass it as `initialView`; give the canvas `key={page.id}`. Poll `store.refreshPages()` every 1.5 s while any page is queued/rendering/preview.
 - **Selection & hover → right panel** (`CommentsPanel.tsx`):
   - `selectedId` (pinned) and `hoverId` (from canvas `onHover`, mouse/pen only).
-  - Panel shows `hoverId` when it's set and the panel isn't "busy" (focus inside the panel, or the pointer is over the panel, or a comment draft is being typed); otherwise `selectedId`. When the hover ends, keep showing the hovered circle for 700 ms (so the pointer can travel into the panel); entering the panel cancels that and **pins** the hovered circle (becomes `selectedId`). Leaving the panel without interacting lets it fall back/close.
+  - Panel shows `hoverId` when it's set and the panel isn't "busy" (the pointer is over the panel, an inline comment edit is open, or the title/composer field has focus AND holds text — an empty focused composer doesn't count); otherwise `selectedId`. While the panel shows, the canvas gets `rightInset` (or `bottomInset` for the phone sheet) and `revealCircle` slides a selected/added circle — or a hovered one under the panel — into view. When the hover ends, keep showing the hovered circle for 700 ms (so the pointer can travel into the panel); entering the panel cancels that and **pins** the hovered circle (becomes `selectedId`). Leaving the panel without interacting lets it fall back/close.
   - Touch: tap a circle → select (panel opens); tap paper → deselect (panel closes); tap another circle → switch.
   - Panel contents (DeployMap side-panel look, width 340 px, floats at the right of the stage with `--shadow-3`, full stage height, slides in 160 ms; on narrow screens (< 700 px) it's a bottom sheet at 60 % height):
     - Header: colour dot, "Circle #12" (or "New circle" while `num` is 0), close button (deselect).

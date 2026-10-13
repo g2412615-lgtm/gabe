@@ -68,9 +68,10 @@ export function flushStoredOutboxes(opts: FlushStoredOptions = {}): Promise<Left
 async function flushAll(opts: FlushStoredOptions): Promise<LeftoverResult[]> {
   const storage = opts.storage !== undefined ? opts.storage : (browserStorage() as ListableStorage | null);
   const results: LeftoverResult[] = [];
+  if (!storage) return results;
   for (const planId of listOutboxPlans(storage)) {
     if (isPlanOpen(planId) || !hasOutbox(storage, planId)) continue;
-    results.push(await flushOne(planId, storage!, opts));
+    results.push(await flushOne(planId, storage, opts));
   }
   return results;
 }
@@ -116,10 +117,10 @@ export function leftoverMessage(names: (string | null)[]): string {
 /** Plans already reported this session (not repeated on every visit to the home page while still offline). */
 const told = new Set<string>();
 
-/** Tell the owner what's still only on this device, and what the server refused. */
 // a long sentence: give it time to be read
 const defaultSay: Notifier = (m, k) => void defaultNotify(m, k, k === "info" ? { duration: 9000 } : {});
 
+/** Tell the owner what's still only on this device, and what the server refused. */
 export function reportLeftovers(results: LeftoverResult[], say: Notifier = defaultSay) {
   for (const r of results) {
     if (!r.unsaved) told.delete(r.planId);

@@ -2,17 +2,20 @@
 // fly-to targets, animation interpolation and the deep-zoom tile grid.
 // World units are the page's full-resolution raster pixels (see geometry.ts).
 
-import { circleWorld, clamp, fitView, levelSize, screenToWorld, type Pt, type View } from "../../../shared/geometry";
+import { circleWorld, clamp, fitView, levelSize, pickLevel, screenToWorld, type Pt, type View } from "../../../shared/geometry";
 import type { CircleRow, PageRow } from "../../../shared/types";
+import { HANDLE_DOT_R, drawRadius, handleRing } from "./hitTest";
 
 export interface Size {
   w: number;
   h: number;
 }
 
+/** Px of the stage covered by floating UI (the right panel, the phone's bottom sheet). */
 export interface Insets {
   top: number;
   right: number;
+  bottom?: number;
 }
 
 type PageDims = Pick<PageRow, "width" | "height">;
@@ -24,14 +27,37 @@ export function scaleLimits(page: PageDims, size: Size): { min: number; max: num
 }
 
 /**
- * The area not covered by floating UI. A right inset that would leave less
- * than 40% of the width is ignored (on a narrow screen the panel is a sheet
- * over the content anyway, and squeezing the page into a sliver helps no one).
+ * Where Fit puts the page: the area not covered by floating UI. An inset
+ * that would leave less than 40% of the width or height is ignored (the
+ * phone's bottom sheet covers 60%: squeezing the whole page into the sliver
+ * above it helps no one).
  */
 export function usableArea(size: Size, insets: Insets) {
   const right = size.w - insets.right < size.w * 0.4 ? 0 : Math.max(0, insets.right);
-  const top = size.h - insets.top < size.h * 0.4 ? 0 : Math.max(0, insets.top);
-  return { x: 0, y: top, w: Math.max(1, size.w - right), h: Math.max(1, size.h - top) };
+  let top = Math.max(0, insets.top);
+  let bottom = Math.max(0, insets.bottom ?? 0);
+  if (size.h - top - bottom < size.h * 0.4) bottom = 0;
+  if (size.h - top - bottom < size.h * 0.4) top = 0;
+  return { x: 0, y: top, w: Math.max(1, size.w - right), h: Math.max(1, size.h - top - bottom) };
+}
+
+/** Below this many px an inset is ignored even for focus/reveal: the stage is too small for it to mean anything. */
+const MIN_VISIBLE = 80;
+
+/**
+ * The part of the stage the owner can actually see, for putting one circle
+ * in view (focus, reveal, the zoom buttons' centre): every inset counts, so
+ * on a phone the circle lands above the bottom sheet, not under it.
+ */
+export function visibleArea(size: Size, insets: Insets) {
+  const w = Math.max(1, size.w);
+  const h = Math.max(1, size.h);
+  const right = w - insets.right >= MIN_VISIBLE ? Math.max(0, insets.right) : 0;
+  let top = Math.max(0, insets.top);
+  let bottom = Math.max(0, insets.bottom ?? 0);
+  if (h - top - bottom < MIN_VISIBLE) bottom = 0;
+  if (h - top - bottom < MIN_VISIBLE) top = 0;
+  return { x: 0, y: top, w: Math.max(1, w - right), h: Math.max(1, h - top - bottom) };
 }
 
 /** Whole page centred in the uncovered area. */
@@ -41,9 +67,9 @@ export function fitInsets(page: PageDims, size: Size, insets: Insets): View {
   return { scale: v.scale, tx: v.tx + a.x, ty: v.ty + a.y };
 }
 
-/** Centre of the uncovered area (zoom buttons zoom around it). */
+/** Centre of the visible area (zoom buttons zoom around it). */
 export function usableCentre(size: Size, insets: Insets): Pt {
-  const a = usableArea(size, insets);
+  const a = visibleArea(size, insets);
   return { x: a.x + a.w / 2, y: a.y + a.h / 2 };
 }
 
@@ -61,11 +87,84 @@ export function focusView(
   limits: { min: number; max: number },
 ): View {
   const { cx, cy, r } = circleWorld(c, page);
-  const a = usableArea(size, insets);
+  const a = visibleArea(size, insets);
   let scale = (0.35 * Math.min(a.w, a.h)) / Math.max(2 * r, 1e-6);
   scale = Math.max(scale, current.scale / 2);
   scale = clamp(scale, limits.min, limits.max);
   return { scale, tx: a.x + a.w / 2 - cx * scale, ty: a.y + a.h / 2 - cy * scale };
+}
+
+/** Breathing room kept around a revealed circle's selection (screen px). */
+export const REVEAL_MARGIN = 24;
+/** How far the selected circle's number badge rides above its handle ring: lift 22 + half its 18 px height. */
+const BADGE_ABOVE_RING = 31;
+
+/**
+ * The selected circle's drawn extent around its centre (screen px) at
+ * `scale`: rim + dashed ring, handles and, above, the number badge.
+ */
+function selectionExtent(rWorld: number, scale: number, coarse: boolean) {
+  const R = drawRadius(rWorld, scale);
+  const ring = handleRing(R, coarse);
+  const side = Math.max(R + 7, ring + HANDLE_DOT_R);
+  return { side, top: Math.max(side, ring + BADGE_ABOVE_RING) };
+}
+
+/**
+ * Bring a circle out from under the floating UI: the smallest pan that puts
+ * the circle (with its handles and badge) plus REVEAL_MARGIN inside the
+ * visible area. Returns `current` unchanged when it's already in view. Zooms
+ * only when it can't fit at the current scale — then out, just enough (never
+ * past the limits), and centred.
+ */
+export function revealView(
+  page: PageDims,
+  c: Pick<CircleRow, "x" | "y" | "r">,
+  size: Size,
+  insets: Insets,
+  current: View,
+  limits: { min: number; max: number },
+  coarse: boolean,
+): View {
+  const { cx, cy, r } = circleWorld(c, page);
+  const a = visibleArea(size, insets);
+  const M = REVEAL_MARGIN;
+  const fits = (s: number) => {
+    const e = selectionExtent(r, s, coarse);
+    return 2 * (e.side + M) <= a.w + 1e-6 && e.top + e.side + 2 * M <= a.h + 1e-6;
+  };
+
+  let scale = current.scale;
+  if (!fits(scale)) {
+    // Too big at this zoom: a circle that big is drawn at its true size
+    // (R = r·s, ring = R), so the extents are linear in s.
+    const byW = (a.w / 2 - 7 - M) / Math.max(r, 1e-9);
+    const byH = (a.h - 7 - BADGE_ABOVE_RING - 2 * M) / Math.max(2 * r, 1e-9);
+    scale = clamp(Math.min(byW, byH, scale), limits.min, scale);
+    const e = selectionExtent(r, scale, coarse);
+    // centred: the box's middle (the badge makes the top taller) in the area's middle
+    return {
+      scale,
+      tx: a.x + a.w / 2 - cx * scale,
+      ty: a.y + a.h / 2 - cy * scale + (e.top - e.side) / 2,
+    };
+  }
+
+  const e = selectionExtent(r, scale, coarse);
+  const sx = cx * scale + current.tx;
+  const sy = cy * scale + current.ty;
+  const left = sx - e.side - M;
+  const right = sx + e.side + M;
+  const top = sy - e.top - M;
+  const bottom = sy + e.side + M;
+  let dx = 0;
+  let dy = 0;
+  if (left < a.x) dx = a.x - left;
+  else if (right > a.x + a.w) dx = a.x + a.w - right;
+  if (top < a.y) dy = a.y - top;
+  else if (bottom > a.y + a.h) dy = a.y + a.h - bottom;
+  if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return current;
+  return { scale, tx: current.tx + dx, ty: current.ty + dy };
 }
 
 /**
@@ -176,4 +275,48 @@ export function visibleTiles(
   }
   out.sort((a, b) => a.d - b.d);
   return out.map(({ d: _d, ...t }) => t);
+}
+
+// ── which tiles to mount ─────────────────────────────────────────────────
+
+export interface TilePlan {
+  /** The level shown (null: the preview alone is sharp enough). */
+  target: number | null;
+  /** Tiles of `target` to mount. */
+  tiles: TileBox[];
+  /** Every tile of `target` in view has loaded (it can be the fallback for the next level change). */
+  complete: boolean;
+}
+
+/**
+ * Which deep-zoom tiles to mount for this frame.
+ *
+ * While the zoom is moving (a pinch, a wheel burst, an animation —
+ * `settled` false) nothing new is fetched: the level `held` from the last
+ * settled frame keeps the tiles it already has on screen, and the preview
+ * fills the rest. A pinch from Fit to 1000% would otherwise fetch every
+ * level it passes through (and, zooming out, more and more tiles of a level
+ * that's about to be dropped), leaving the final tiles queued behind
+ * abandoned ones. Once the zoom settles, the level follows it again.
+ */
+export function planTiles(
+  page: PageRow,
+  view: View,
+  size: Size,
+  dpr: number,
+  settled: boolean,
+  /** The level from the last settled frame (undefined: none yet, e.g. a new page). */
+  held: number | null | undefined,
+  /** true loaded, false failed (finished all the same), undefined not yet. */
+  status: (t: TileBox) => boolean | undefined,
+): TilePlan {
+  if (size.w <= 0 || size.h <= 0) return { target: null, tiles: [], complete: true };
+  if (!settled && held !== undefined) {
+    if (held === null) return { target: null, tiles: [], complete: true };
+    return { target: held, tiles: visibleTiles(page, view, size, held, 0).filter((t) => status(t) === true), complete: false };
+  }
+  const target = pickLevel(page, view.scale, dpr);
+  if (target === null) return { target, tiles: [], complete: true };
+  const tiles = visibleTiles(page, view, size, target);
+  return { target, tiles, complete: tiles.every((t) => status(t) !== undefined) };
 }

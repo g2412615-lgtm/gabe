@@ -15,6 +15,16 @@ export interface CanvasHandle {
   fit(): void;
   /** Pan/zoom so the circle is centred and comfortably sized. */
   focusCircle(id: string): void;
+  /**
+   * Make sure the circle isn't hidden under floating UI: pan (animated,
+   * ≤ 250 ms) by the least amount that puts it — handles, badge and a 24 px
+   * margin — inside the area the top/right/bottom insets leave uncovered.
+   * Does nothing if it's already in view; zooms out only if it can't fit.
+   * Uses the insets of the latest render, measured on the next frame, so
+   * call it right after the change that opens the panel (or any time
+   * later). A circle that isn't in `circles` yet is waited for (3 s).
+   */
+  revealCircle(id: string): void;
   getView(): View;
 }
 
@@ -54,7 +64,14 @@ export interface BlueprintCanvasProps {
   onGesture(e: CanvasGestureEvent): void;
   /** Cancel button in the add-mode hint (the editor owns the mode). */
   onCancelAdd?(): void;
-  /** Px covered by floating UI (the right panel): fit/focus keep content clear of it. */
+  /** Px covered by floating UI (the right panel): fit/focus/reveal keep content clear of it. */
   topInset?: number;
   rightInset?: number;
+  /**
+   * Px covered at the bottom (the phone's bottom sheet). Focus and reveal
+   * keep the circle above it and the zoom controls sit on it; Fit ignores it
+   * while it would leave less than 40% of the height. Changing an inset
+   * never moves the view by itself.
+   */
+  bottomInset?: number;
 }

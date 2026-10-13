@@ -13,6 +13,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { Worker } from "node:worker_threads";
 import * as mupdf from "mupdf";
 import sharp from "sharp";
 import type { WorkerMessage, WorkerTask } from "./protocol";
@@ -53,8 +54,17 @@ try {
 } catch {
   /* not Linux */
 }
-// The server went away (crashed or was stopped): stop rendering for nobody.
+// The server went away (crashed or was killed): stop rendering for nobody —
+// a leftover render would compete for memory with the next boot's. mupdf
+// works synchronously for seconds at a time, so 'disconnect' alone can't
+// fire mid-render; a tiny watchdog thread notices at once (this process gets
+// a new parent) and ends it.
 process.on("disconnect", () => process.exit(1));
+new Worker(
+  `const ppid = ${process.ppid};
+   setInterval(() => { if (process.ppid !== ppid) process.kill(${process.pid}, "SIGKILL"); }, 500);`,
+  { eval: true },
+).unref();
 
 /** Send a message; resolves once it has been handed to the server. */
 const post = (m: WorkerMessage) =>

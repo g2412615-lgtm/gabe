@@ -32,7 +32,7 @@ them straight into the Fly.io, GitHub or Cloudflare pages below.
 3. Click **New repository secret** again and add:
    - **Name** `BLUEPRINTS_PASSWORD`, **Secret**: the password you want to sign in with.
    - Make it long, at least 12 characters.
-   - You'll type it once on each device. The iPad and the computer then stay signed in, as long as you keep using them.
+   - You'll type it once on each device. The iPad and the computer then stay signed in for up to a year while you keep using them.
 4. Only if your Fly organization's slug from step 1 isn't `personal`:
    1. Open the **Variables** tab on the same page, not Secrets.
    2. Add **Name** `FLY_ORG` with that slug as its **Value**.
@@ -79,6 +79,17 @@ It then opens full screen like an app, without Safari's address bar.
 
   Changing the password signs out every device, so a lost iPad loses access. Then sign in again on the devices you still have.
 - **Check it's up:** https://blueprints.gabeweb.com/api/health should show `"ok":true`.
+
+## If the storage fills up
+
+The app warns before it's full. It turns down new uploads with "The app's storage is full…", and https://blueprints.gabeweb.com/api/health shows `"storage":"full"`. Ten gigabytes holds a lot of blueprints. To add more, on a computer with the Fly command line:
+
+```bash
+fly volumes list -a gabeweb-blueprints
+fly volumes extend <the volume id from the list> -s 20 -a gabeweb-blueprints
+```
+
+Then press **Retry** on any page that couldn't be prepared.
 
 ## Backups
 

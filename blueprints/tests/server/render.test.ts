@@ -5,6 +5,7 @@
 // area, and a full disk says so.
 
 import fs from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { PDFDocument } from "pdf-lib";
 import sharp from "sharp";
@@ -78,7 +79,9 @@ describe("a page whose renderer keeps dying", () => {
       expect(fs.readdirSync(path.join(s.dataDir, "tmp"))).toEqual([]);
 
       // Retry gives it fresh attempts
-      expect((await c.post(`/api/pages/${pageId}/retry`)).json.page.status).toBe("queued");
+      const retried = (await c.post(`/api/pages/${pageId}/retry`)).json.page;
+      expect(["queued", "rendering"]).toContain(retried.status); // the queue may have picked it up already
+      expect(retried.error).toBeNull();
       await killWorker(pageId, killed);
       const [ready] = await waitFor(async () => {
         const ps = await pagesOf(c, up.json.plan.id);
@@ -133,6 +136,24 @@ describe("a page whose renderer keeps dying", () => {
       const preview = await fetch(`${s.url}/api/pages/${page.id}/${page.assetKey}/preview.webp`, { headers: { cookie: c2.cookie } });
       expect(preview.status).toBe(200);
       expect(fs.existsSync(path.join(s.dataDir, "assets", page.id, page.assetKey, "tiles"))).toBe(false);
+    });
+  });
+
+  it.skipIf(!linux)("isn't charged for a restart that cut its render short (a deploy)", async () => {
+    const first = await startTestServer({});
+    const c = await signedInClient(first);
+    const up = await c.upload(await makePdf({ pages: 1, size: ARCH_D }), { filename: "deploy.pdf" });
+    const pageId = up.json.pages[0].id;
+    await waitFor(async () => renderWorkers(pageId).length > 0, 20_000, 5);
+    await first.shutdown(0); // no grace: the render is stopped
+    expect(renderWorkers(pageId)).toEqual([]);
+    const db = new DatabaseSync(path.join(first.dataDir, "app.db"));
+    expect(db.prepare("SELECT status, render_attempts AS n FROM pages WHERE id = ?").get(pageId)).toEqual({ status: "rendering", n: 0 });
+    db.close();
+
+    await withServer({ dataDir: first.dataDir }, async (s, c2) => {
+      await s.queue.whenIdle();
+      expect((await pagesOf(c2, up.json.plan.id))[0].status).toBe("ready");
     });
   });
 
@@ -297,7 +318,6 @@ describe("a full disk", () => {
       expect(page.status).toBe("failed");
       expect(page.error).toBe(STORAGE_RENDER);
     });
-    void c;
   });
 
   it("recognises disk-full errors from the file system and SQLite", () => {

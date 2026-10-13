@@ -2,10 +2,11 @@
 //
 // Two coordinate layers (DeployMap's split): circle bodies live in a world
 // group scaled with the page (their strokes use non-scaling-stroke so they
-// stay 2–3 px), while the selection ring, resize handles and the add-mode
-// preview are drawn in plain screen px so they keep a constant, finger-sized
-// look at every zoom. Nothing here takes pointer events — hit testing is
-// done by math in the controller.
+// stay 2–3 px), while the selection ring, resize handles, move grip and the
+// add-mode preview are drawn in plain screen px so they keep a constant,
+// finger-sized look at every zoom. Nothing here takes pointer events — hit
+// testing is done by math in the controller (hitTest.ts), from the same
+// constants, so what's drawn is exactly what a press finds.
 //
 // Zooming must not re-render every circle (a plan can have hundreds, and a
 // pinch changes the scale every frame). The circle components don't depend
@@ -17,7 +18,19 @@ import { memo, useLayoutEffect, useMemo, useRef, type ReactElement } from "react
 import { CIRCLE_COLORS, DEFAULT_CIRCLE_COLOR } from "../../../shared/constants";
 import { circleWorld, longSide, worldToScreen, type View } from "../../../shared/geometry";
 import type { CircleColor, CircleRow, PageRow } from "../../../shared/types";
-import { HANDLE_DIRS, HANDLE_DOT_R, HANDLE_HIT_R, MIN_DRAW_R, drawRadius, handlePoint } from "./hitTest";
+import {
+  GRIP_HIT_R,
+  GRIP_R,
+  HANDLE_DIRS,
+  HANDLE_DOT_R,
+  HANDLE_HIT_R,
+  HANDLE_RING_MIN,
+  MIN_DRAW_R,
+  drawRadius,
+  handlePoint,
+  handleRing,
+} from "./hitTest";
+import type { CanvasMode } from "./types";
 import type { Size } from "./viewMath";
 
 type Palette = (typeof CIRCLE_COLORS)[CircleColor];
@@ -33,6 +46,8 @@ const LIT_FILL: Record<string, string> = Object.fromEntries(
 const badgeWidth = (n: number) => Math.max(18, 8 + n * 6.6);
 /** On the selected circle the badge rides above the N handle and the dashed ring instead of under them. */
 const SELECTED_BADGE_LIFT = 22;
+/** Feather's "move" glyph (four arrows), centred on 0,0, 14 px across. */
+const GRIP_GLYPH = "M0 -7V7M-7 0H7M-2.6 -4.4L0 -7L2.6 -4.4M-2.6 4.4L0 7L2.6 4.4M-4.4 -2.6L-7 0L-4.4 2.6M4.4 -2.6L7 0L4.4 2.6";
 
 interface MarkProps {
   cx: number;
@@ -73,12 +88,14 @@ const CircleMark = memo(function CircleMark({ cx, cy, r, color, num, lit, select
 /**
  * The zoom-dependent part of every circle, applied to the DOM directly:
  * the drawn radius (never under 10 screen px) and the badge, which sits on
- * the drawn top edge at a constant screen size. `list` is in DOM order.
+ * the drawn top edge at a constant screen size (on the selected circle, on
+ * its handle ring, which a small circle pushes out). `list` is in DOM order.
  */
-function sizeMarks(world: SVGGElement, list: readonly CircleRow[], page: PageRow, scale: number) {
+function sizeMarks(world: SVGGElement, list: readonly CircleRow[], page: PageRow, scale: number, selectedId: string | null, ringMin: number) {
   const ls = longSide(page);
   const inv = 1 / scale;
   const minR = MIN_DRAW_R * inv;
+  const ringMinW = ringMin * inv;
   const marks = world.children;
   for (let i = 0; i < list.length && i < marks.length; i++) {
     const c = list[i];
@@ -91,7 +108,8 @@ function sizeMarks(world: SVGGElement, list: readonly CircleRow[], page: PageRow
       glow.setAttribute("r", rs);
       body.setAttribute("r", rs);
     }
-    badge.setAttribute("transform", `translate(${c.x * page.width} ${c.y * page.height - R}) scale(${inv})`);
+    const top = c.id === selectedId && R < ringMinW ? ringMinW : R;
+    badge.setAttribute("transform", `translate(${c.x * page.width} ${c.y * page.height - top}) scale(${inv})`);
   }
 }
 
@@ -115,9 +133,11 @@ export interface AnnotationLayerProps {
   draft: { id: string; x: number; y: number; r: number } | null;
   addPreview: { x: number; y: number; r: number } | null;
   coarse: boolean;
+  /** The grip only means something in move mode. */
+  mode: CanvasMode;
 }
 
-function AnnotationLayer({ page, circles, view, size, selectedId, hoverId, litId, draft, addPreview, coarse }: AnnotationLayerProps) {
+function AnnotationLayer({ page, circles, view, size, selectedId, hoverId, litId, draft, addPreview, coarse, mode }: AnnotationLayerProps) {
   // Bigger circles first, so a small one inside a big one is drawn on top
   // (and is what a tap picks — see hitTest).
   const ordered = useMemo(() => {
@@ -157,39 +177,56 @@ function AnnotationLayer({ page, circles, view, size, selectedId, hoverId, litId
   }, [ordered, page.width, page.height, ls, selectedId, hoverId, litId]);
 
   const worldRef = useRef<SVGGElement>(null);
+  const ringMin = coarse ? HANDLE_RING_MIN.coarse : HANDLE_RING_MIN.fine;
   useLayoutEffect(() => {
-    if (worldRef.current) sizeMarks(worldRef.current, ordered, page, view.scale);
-  }, [ordered, page, view.scale]);
+    if (worldRef.current) sizeMarks(worldRef.current, ordered, page, view.scale, selectedId, ringMin);
+  }, [ordered, page, view.scale, selectedId, ringMin]);
 
   return (
     <svg className="bp-annos" width={size.w} height={size.h} aria-hidden="true">
       <g ref={worldRef} transform={`translate(${view.tx} ${view.ty}) scale(${view.scale})`}>
         {marks}
       </g>
-      {selected && <SelectionMarks c={selected} page={page} view={view} coarse={coarse} />}
+      {selected && <SelectionMarks c={selected} page={page} view={view} coarse={coarse} grip={mode === "move"} />}
       {addPreview && <AddPreview p={addPreview} />}
     </svg>
   );
 }
 
-/** Dashed outer ring + four resize handles, in screen px. */
-function SelectionMarks({ c, page, view, coarse }: { c: CircleRow; page: PageRow; view: View; coarse: boolean }) {
+/**
+ * Dashed outer ring, four resize handles and the move grip, in screen px.
+ * On a small circle the handles move out past the rim, leaving the middle
+ * to the grip; a short stalk ties each to the ring, which keeps hugging the
+ * circle so its real size still shows.
+ */
+function SelectionMarks({ c, page, view, coarse, grip }: { c: CircleRow; page: PageRow; view: View; coarse: boolean; grip: boolean }) {
   const w = circleWorld(c, page);
   const centre = worldToScreen(view, { x: w.cx, y: w.cy });
   const R = drawRadius(w.r, view.scale);
+  const ring = handleRing(R, coarse);
   const p = palette(c.color);
+  const stalk = ring - HANDLE_DOT_R > R + 7;
   return (
     <g className="bp-selection">
       <circle className="bp-sel-ring" cx={centre.x} cy={centre.y} r={R + 7} stroke={p.stroke} />
       {HANDLE_DIRS.map((dir) => {
-        const h = handlePoint(centre, R, dir);
+        const h = handlePoint(centre, ring, dir);
+        const s = stalk ? handlePoint(centre, R + 7, dir) : null;
         return (
           <g key={dir} className={`bp-handle bp-handle-${dir}`}>
+            {s && <line className="bp-handle-stalk" x1={s.x} y1={s.y} x2={h.x} y2={h.y} stroke={p.stroke} />}
             <circle className="bp-handle-hit" cx={h.x} cy={h.y} r={coarse ? HANDLE_HIT_R.touch : HANDLE_HIT_R.mouse} />
             <circle className="bp-handle-dot" cx={h.x} cy={h.y} r={HANDLE_DOT_R} stroke={p.stroke} />
           </g>
         );
       })}
+      {grip && (
+        <g className="bp-grip" transform={`translate(${centre.x} ${centre.y})`}>
+          <circle className="bp-grip-hit" r={coarse ? GRIP_HIT_R.touch : GRIP_HIT_R.mouse} />
+          <circle className="bp-grip-chip" r={GRIP_R} fill={p.stroke} />
+          <path className="bp-grip-glyph" d={GRIP_GLYPH} />
+        </g>
+      )}
     </g>
   );
 }

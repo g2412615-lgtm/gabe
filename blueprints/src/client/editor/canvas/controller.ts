@@ -14,6 +14,7 @@ import {
   focusView,
   interpolateView,
   isSensibleView,
+  revealView,
   sameView,
   scaleLimits,
   usableCentre,
@@ -34,6 +35,12 @@ export interface Snapshot {
   hoverId: string | null;
   /** Long-press feedback rings (screen px). */
   holds: { id: number; x: number; y: number }[];
+  /**
+   * A zoom is under way (an animation, a wheel burst, a pinch): the raster
+   * layer holds its tile level until it ends (or pauses), instead of
+   * fetching every level the zoom passes through.
+   */
+  zooming: boolean;
 }
 
 /** Safari's non-standard GestureEvent (Mac trackpad pinch, iPad Magic Keyboard trackpad). */
@@ -47,6 +54,7 @@ const VIEW_EMIT_MS = 250; // onViewChange at most 4×/s while moving
 const WHEEL_SETTLE_MS = 160;
 const HOLD_RING_MS = 650;
 const FOCUS_WAIT_MS = 3000;
+const REVEAL_MS = 220;
 
 const kindOf = (t: string): PointerKind => (t === "touch" ? "touch" : t === "pen" ? "pen" : "mouse");
 
@@ -85,6 +93,10 @@ export class CanvasController implements GestureHost {
   private anim: { from: View; to: View; t0: number; ms: number } | null = null;
   private lastFit: View | null = null;
   private pendingFocus: { id: string; until: number } | null = null;
+  /** revealCircle() runs at the next frame, with the insets of the render that opened the panel. */
+  private pendingReveal: { id: string; until: number } | null = null;
+  /** `(pointer: coarse)`, as BlueprintCanvas rendered it: handles sit where they're drawn. */
+  private coarse = false;
   private pendingUpdate: CanvasGestureEvent | null = null;
   private draftV: Snapshot["draft"] = null;
   private addPrev: Snapshot["addPreview"] = null;
@@ -123,6 +135,7 @@ export class CanvasController implements GestureHost {
     zoomOut: () => this.zoomButton(1 / 1.3),
     fit: () => this.fit(true),
     focusCircle: (id) => this.focusCircle(id),
+    revealCircle: (id) => this.revealCircle(id),
     getView: () => ({ ...this.v }),
   };
 
@@ -133,6 +146,12 @@ export class CanvasController implements GestureHost {
     if (p.page.width !== prev.page.width || p.page.height !== prev.page.height) this.fit(false);
     if (p.circles !== prev.circles || p.selectedId !== prev.selectedId || p.mode !== prev.mode) this.refreshHover();
     if (this.pendingFocus) this.tryPendingFocus();
+    // (inset changes alone never move the view: the panel opening must not refit or pan a view the owner chose)
+    if (this.pendingReveal) this.requestFrame();
+  }
+
+  setCoarse(coarse: boolean) {
+    this.coarse = coarse;
   }
 
   /** Wire up the gesture surface; returns the cleanup. */
@@ -237,7 +256,7 @@ export class CanvasController implements GestureHost {
   }
 
   private insets(): Insets {
-    return { top: this.props.topInset ?? 0, right: this.props.rightInset ?? 0 };
+    return { top: this.props.topInset ?? 0, right: this.props.rightInset ?? 0, bottom: this.props.bottomInset ?? 0 };
   }
 
   // ── frames ────────────────────────────────────────────────────────────
@@ -251,6 +270,7 @@ export class CanvasController implements GestureHost {
     if (!this.alive) return;
     this.inFrame = true;
     let again = false;
+    if (this.pendingReveal) this.runPendingReveal();
     if (this.anim) {
       const a = this.anim;
       const t = clamp((performance.now() - a.t0) / a.ms, 0, 1);
@@ -284,6 +304,7 @@ export class CanvasController implements GestureHost {
       addPreview: this.addPrev,
       hoverId: this.hoverId,
       holds: this.holds,
+      zooming: !!this.anim || !!this.wheelTimer || !!this.safari || this.machine.activity === "pinch",
     };
   }
 
@@ -374,13 +395,39 @@ export class CanvasController implements GestureHost {
     else if (this.props.circles.some((c) => c.id === pf.id)) this.focusCircle(pf.id);
   }
 
+  private revealCircle(id: string) {
+    this.pendingReveal = { id, until: performance.now() + FOCUS_WAIT_MS };
+    this.requestFrame();
+  }
+
+  /** In a frame: pan the pending circle out from under the floating UI (see CanvasHandle.revealCircle). */
+  private runPendingReveal() {
+    const pr = this.pendingReveal;
+    if (!pr || !this.ready) return;
+    if (performance.now() > pr.until) {
+      this.pendingReveal = null;
+      return;
+    }
+    const c = this.props.circles.find((x) => x.id === pr.id);
+    if (!c || this.sz.w <= 0 || this.sz.h <= 0) return; // the circle arrives with the next props (setProps asks for a frame)
+    this.pendingReveal = null;
+    // Never pull the blueprint out from under a hand that's moving it.
+    const a = this.machine.activity;
+    if (a === "pan" || a === "pinch" || a === "move" || a === "resize" || this.safari) return;
+    const cur = this.anim?.to ?? this.v;
+    const target = revealView(this.props.page, c, this.sz, this.insets(), cur, this.limits(), this.coarse);
+    if (target !== cur) this.animateTo(target, REVEAL_MS);
+  }
+
   // ── GestureHost ───────────────────────────────────────────────────────
 
   view() {
     return this.v;
   }
 
+  /** A hand moved the view (pan, pinch, wheel): it wins over any animation still running. */
   setView(v: View) {
+    this.stopAnimation();
     this.v = v;
     this.requestFrame();
   }
@@ -398,7 +445,14 @@ export class CanvasController implements GestureHost {
   }
 
   hitTest(pt: Pt, type: PointerKind): Hit {
-    return hitTest(pt, { view: this.v, page: this.props.page, circles: this.props.circles, selectedId: this.props.selectedId, pointerType: type });
+    return hitTest(pt, {
+      view: this.v,
+      page: this.props.page,
+      circles: this.props.circles,
+      selectedId: this.props.selectedId,
+      pointerType: type,
+      coarse: this.coarse,
+    });
   }
 
   circle(id: string): CircleGeom | null {
@@ -500,7 +554,9 @@ export class CanvasController implements GestureHost {
       const h = hit ?? (this.hoverPt && this.ready ? this.hitTest(this.hoverPt, this.hoverPt.type) : null);
       if (h?.kind === "handle") c = resizeCursor(h.dir);
       else if (this.props.mode === "add") c = "crosshair";
-      else if (h?.kind === "circle") c = h.selected ? "move" : "pointer";
+      else if (h?.kind === "grip") c = "move";
+      // a big selected circle's body pans, like paper; a click elsewhere selects
+      else if (h?.kind === "circle") c = h.grab ? "move" : h.selected ? "grab" : "pointer";
       else c = "grab";
     }
     if (el.dataset.cursor !== c) el.dataset.cursor = c;

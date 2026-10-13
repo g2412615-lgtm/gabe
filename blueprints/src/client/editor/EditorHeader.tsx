@@ -54,6 +54,7 @@ function EditorHeader(p: EditorHeaderProps) {
           <InlineRename
             value={p.plan.name}
             onCommit={p.onRename}
+            commitWhileTyping
             ariaLabel="Event plan name"
             title="Rename this event plan"
             maxLength={MAX_PLAN_NAME_CHARS}

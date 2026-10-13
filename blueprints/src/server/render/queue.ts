@@ -184,7 +184,7 @@ export class RenderQueue {
   }
 
   private async render(job: Job) {
-    const { db, dataDir, log } = this.opts;
+    const { dataDir, log } = this.opts;
     const started = Date.now();
     const outDir = this.outDir(job);
     const workDir = path.join(dataDir, "tmp", `render-${job.assetKey}`);
@@ -201,21 +201,13 @@ export class RenderQueue {
     }
 
     const cur = { job, previewed: false, stoppedFor: null } as Current;
-    cur.run = runWorker(
-      { task: "render", file: job.file, kind: job.kind, pageIndex: job.pageIndex, outDir, workDir },
-      {
-        timeoutMs: this.opts.timeoutMs,
-        onMessage: (m) => {
-          if (m.type !== "preview") return;
-          cur.previewed = true;
-          // The page is viewable from here on; tiles keep rendering.
-          db.prepare(
-            `UPDATE pages SET status = 'preview', width = ?, height = ?, preview_w = ?, preview_h = ?, updated_at = ?, rev = rev + 1
-             WHERE id = ? AND asset_key = ? AND status = 'rendering'`,
-          ).run(m.width, m.height, m.previewW, m.previewH, Date.now(), job.pageId, job.assetKey);
-        },
-      },
-    );
+    try {
+      cur.run = this.startWorker(cur, outDir, workDir);
+    } catch (e) {
+      this.fail(job, RENDER_ERRORS.failed);
+      log.error(`[render] page ${job.pageId}: couldn't start a worker`, e);
+      return;
+    }
     // The worker process is gone by the time either branch runs, so nothing
     // writes into the work folder any more.
     cur.done = cur.run.promise.then(
@@ -231,6 +223,26 @@ export class RenderQueue {
     this.current = cur;
     await cur.done;
     this.current = null;
+  }
+
+  private startWorker(cur: Current, outDir: string, workDir: string): WorkerRun {
+    const { db } = this.opts;
+    const { job } = cur;
+    return runWorker(
+      { task: "render", file: job.file, kind: job.kind, pageIndex: job.pageIndex, outDir, workDir },
+      {
+        timeoutMs: this.opts.timeoutMs,
+        onMessage: (m) => {
+          if (m.type !== "preview") return;
+          cur.previewed = true;
+          // The page is viewable from here on; tiles keep rendering.
+          db.prepare(
+            `UPDATE pages SET status = 'preview', width = ?, height = ?, preview_w = ?, preview_h = ?, updated_at = ?, rev = rev + 1
+             WHERE id = ? AND asset_key = ? AND status = 'rendering'`,
+          ).run(m.width, m.height, m.previewW, m.previewH, Date.now(), job.pageId, job.assetKey);
+        },
+      },
+    );
   }
 
   private finish(cur: Current, m: FinalMessage, started: number) {
@@ -289,7 +301,7 @@ export class RenderQueue {
       // almost always the kernel killing it for memory: one more try, then give up
       if (job.attempts >= MAX_RENDER_ATTEMPTS) this.fail(job, RENDER_ERRORS.tooLarge);
       else this.requeue(job, false);
-      log.error(`[render] page ${job.pageId}: attempt ${job.attempts} of ${MAX_RENDER_ATTEMPTS} failed`, err);
+      log.error(`[render] page ${job.pageId}: attempt ${job.attempts} of ${MAX_RENDER_ATTEMPTS} failed: ${err.message}`);
     } else {
       this.fail(job, RENDER_ERRORS.failed);
       log.error(`[render] page ${job.pageId}: worker failed`, err);

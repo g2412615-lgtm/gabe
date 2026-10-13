@@ -1,6 +1,7 @@
 // Floating controls over the canvas: the zoom panel (bottom-right) and the
 // add-mode hint (top-centre). Both stay clear of the editor's floating right
-// panel via `rightInset`. The three glyphs are drawn here (Feather paths, the
+// panel via `rightInset`; the zoom panel also rides on top of the phone's
+// bottom sheet (`bottomInset`). The three glyphs are drawn here (Feather paths, the
 // same style as ui/icons.tsx) so the canvas has no dependency on the icon set.
 
 import type { ReactNode } from "react";
@@ -36,12 +37,21 @@ export function ZoomControls(props: {
   canZoomIn: boolean;
   canZoomOut: boolean;
   rightInset: number;
+  bottomInset: number;
   onZoomIn(): void;
   onZoomOut(): void;
   onFit(): void;
 }) {
   return (
-    <div className="bp-zoom" role="group" aria-label="Zoom" style={props.rightInset ? { right: 14 + props.rightInset } : undefined}>
+    <div
+      className="bp-zoom"
+      role="group"
+      aria-label="Zoom"
+      style={{
+        ...(props.rightInset ? { right: 14 + props.rightInset } : null),
+        ...(props.bottomInset ? { bottom: 14 + props.bottomInset } : null),
+      }}
+    >
       <button type="button" className="bp-zoom-btn" onClick={props.onZoomOut} disabled={!props.canZoomOut} aria-label="Zoom out" title="Zoom out (−)">
         <GlyphMinus />
       </button>

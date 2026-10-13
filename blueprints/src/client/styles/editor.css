@@ -237,10 +237,7 @@ button.ed-page-name {
   background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
   background-size: 22px 22px;
 }
-/* phone widths: the comments sheet covers the bottom; keep the zoom buttons above it */
-.ed-root.is-sheet .ed-stage.panel-open .bp-zoom {
-  bottom: calc(60% + 12px);
-}
+/* (phone widths: the canvas lifts its zoom buttons above the comments sheet — EditorPage passes it bottomInset) */
 
 /* ── left sidebar: Pages | Notes ─────────────────────────────────────── */
 
@@ -1227,6 +1224,11 @@ textarea.cp-input {
   button.ed-page-name {
     height: var(--hit);
   }
+  /* "← Plans" shrinks to its arrow below 900 px: keep it a full square */
+  .ed-back {
+    min-width: var(--hit);
+    justify-content: center;
+  }
   /* the save pill stays a slim pill; an invisible margin makes it a full finger target */
   .ed-header .save-status {
     position: relative;
@@ -1270,11 +1272,25 @@ textarea.cp-input {
   .cp-size input[type="range"] {
     height: var(--hit);
   }
+  /* Edit / Delete on a comment: full finger height, and apart so a tap meant for one can't land on the other */
   button.cp-act {
-    height: 36px;
-    min-height: 36px;
+    height: var(--hit);
+    min-height: var(--hit);
+    min-width: var(--hit);
     padding: 0 12px;
     font-size: var(--fs-sm);
+  }
+  .cp-actions {
+    gap: 8px;
+  }
+  /* Undo / Redo are icon-only: as wide as they are tall */
+  .ed-history > button {
+    min-width: var(--hit);
+  }
+  /* Add, Done */
+  .cp-composer-foot button,
+  .cp-edit-foot button {
+    min-width: var(--hit);
   }
   textarea.cp-edit,
   textarea.cp-input {
@@ -1283,6 +1299,10 @@ textarea.cp-input {
   input.cp-title {
     height: var(--hit);
     font-size: 16px;
+  }
+  /* the page-rename field: under 16 px, iPad Safari zooms the whole editor in when it takes focus */
+  .ps-rename.model-name-input {
+    font-size: 16px !important;
   }
 }
 
