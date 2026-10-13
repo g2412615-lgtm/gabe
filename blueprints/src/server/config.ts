@@ -29,6 +29,11 @@ export interface ServerConfig {
   renderTimeoutMs: number;
   /** Opening an uploaded PDF to count its pages (inside a worker) may take this long. */
   inspectTimeoutMs: number;
+  /**
+   * Uploads and renders stop (with a "storage is full" message) when the data
+   * volume has less than this free, so autosaves always have room.
+   */
+  minFreeBytes: number;
   /** Start the render queue (tests that only exercise sync can switch it off). */
   render: boolean;
   /** Daily backups + purge timers (off in most tests; the functions are exported). */
@@ -62,6 +67,7 @@ export function defaultConfig(): ServerConfig {
     maxPagesPerFile: MAX_PAGES_PER_FILE,
     renderTimeoutMs: 180_000,
     inspectTimeoutMs: 60_000,
+    minFreeBytes: 256 * 1024 * 1024,
     render: true,
     maintenance: true,
     trustProxy: false,

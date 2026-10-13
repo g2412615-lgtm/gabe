@@ -324,6 +324,12 @@ export class MemoryStorage implements StorageLike {
   data = new Map<string, string>();
   failWrites = false;
   writes = 0;
+  get length() {
+    return this.data.size;
+  }
+  key(i: number) {
+    return [...this.data.keys()][i] ?? null;
+  }
   getItem(key: string) {
     return this.data.get(key) ?? null;
   }
@@ -343,9 +349,14 @@ export class MemoryStorage implements StorageLike {
 
 export class FakeEnv implements SyncEnv {
   visible = true;
+  /** What navigator.onLine would say (false: requests can't leave the device). */
+  connected = true;
   handlers: SyncEnvHandlers | null = null;
   isVisible() {
     return this.visible;
+  }
+  isOnline() {
+    return this.connected;
   }
   listen(h: SyncEnvHandlers) {
     this.handlers = h;

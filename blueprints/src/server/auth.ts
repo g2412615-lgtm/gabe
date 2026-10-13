@@ -1,12 +1,14 @@
 // Sign-in for a single owner: one password (plain APP_PASSWORD or a scrypt
 // APP_PASSWORD_HASH), and a stateless signed cookie
 //
-//   bpn_session = v1.<expiresMs>.<hmacSHA256hex(secret, "v1.<expiresMs>")>
+//   bpn_session = v2.<issuedMs>.<expiresMs>.<hmacSHA256hex(key, "v2.<issuedMs>.<expiresMs>")>
 //
-// Nothing about the session is stored server-side; changing SESSION_SECRET
-// (or deleting DATA_DIR/.session-secret) signs every device out. The cookie
-// lives 180 days and is quietly renewed while in use, so the iPad stays
-// signed in.
+// Nothing about the session is stored server-side. The signing key mixes the
+// server secret (SESSION_SECRET or DATA_DIR/.session-secret) with a
+// fingerprint of the configured password, so changing the password signs
+// every device out — the thing to do when an iPad is lost. The cookie lives
+// 180 days and is quietly renewed while in use, so the iPad stays signed in,
+// but never beyond a year from the sign-in itself (issuedMs rides along).
 
 import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
@@ -16,7 +18,7 @@ import type { Context } from "hono";
 export const SESSION_COOKIE = "bpn_session";
 export const SESSION_DAYS = 180;
 const SESSION_MS = SESSION_DAYS * 86_400_000;
-/** Re-issue the cookie once it is this old, so a device in regular use never reaches the expiry. */
+/** Re-issue the cookie about this often, so a device in regular use never reaches the expiry. */
 const RENEW_AFTER_MS = 7 * 86_400_000;
 
 // ── session secret ───────────────────────────────────────────────────────
@@ -42,8 +44,29 @@ export function resolveSessionSecret(configured: string | null, dataDir: string)
 
 // ── tokens ───────────────────────────────────────────────────────────────
 
-function sign(secret: string, body: string): string {
-  return createHmac("sha256", secret).update(body).digest("hex");
+/** However often it is renewed, a sign-in lasts at most this long; then the password is asked for again. */
+export const SESSION_MAX_DAYS = 365;
+const SESSION_MAX_MS = SESSION_MAX_DAYS * 86_400_000;
+
+/**
+ * The key session cookies are signed with: the server secret mixed with a
+ * fingerprint of the password setting (the hash wins over the plain
+ * password, as in passwordChecker). Any change to either signs every
+ * device out.
+ */
+export function sessionKey(secret: string, password: string | null, passwordHash: string | null): string {
+  const credential = passwordHash ? `hash:${passwordHash}` : password ? `plain:${password}` : "none";
+  return createHmac("sha256", secret).update(`bpn-session-key\0${credential}`).digest("hex");
+}
+
+export interface Session {
+  /** When the password was typed (renewals keep it). */
+  issuedAt: number;
+  expiresAt: number;
+}
+
+function sign(key: string, body: string): string {
+  return createHmac("sha256", key).update(body).digest("hex");
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -52,25 +75,36 @@ function safeEqual(a: string, b: string): boolean {
   return ba.length === bb.length && timingSafeEqual(ba, bb);
 }
 
-export function mintToken(secret: string, now = Date.now()): { token: string; expiresAt: number } {
-  const expiresAt = now + SESSION_MS;
-  const body = `v1.${expiresAt}`;
-  return { token: `${body}.${sign(secret, body)}`, expiresAt };
+/** A cookie value for a sign-in made at `issuedAt` (a renewal passes the original time). */
+export function mintToken(key: string, now = Date.now(), issuedAt = now): { token: string } & Session {
+  const expiresAt = Math.min(now + SESSION_MS, issuedAt + SESSION_MAX_MS);
+  const body = `v2.${issuedAt}.${expiresAt}`;
+  return { token: `${body}.${sign(key, body)}`, issuedAt, expiresAt };
 }
 
-/** The token's expiry when it is genuine and current, else null. */
-export function verifyToken(secret: string, token: string | undefined, now = Date.now()): number | null {
+/** The session when the token is genuine and current, else null. */
+export function verifyToken(key: string, token: string | undefined, now = Date.now()): Session | null {
   if (!token) return null;
   const parts = token.split(".");
-  if (parts.length !== 3 || parts[0] !== "v1" || !/^\d{1,16}$/.test(parts[1])) return null;
-  const expiresAt = Number(parts[1]);
-  if (!Number.isFinite(expiresAt) || expiresAt <= now) return null;
-  return safeEqual(sign(secret, `v1.${parts[1]}`), parts[2]) ? expiresAt : null;
+  if (parts.length !== 4 || parts[0] !== "v2" || !/^\d{1,16}$/.test(parts[1]) || !/^\d{1,16}$/.test(parts[2])) return null;
+  const issuedAt = Number(parts[1]);
+  const expiresAt = Number(parts[2]);
+  if (expiresAt <= now || now - issuedAt >= SESSION_MAX_MS || expiresAt > issuedAt + SESSION_MAX_MS) return null;
+  return safeEqual(sign(key, `v2.${parts[1]}.${parts[2]}`), parts[3]) ? { issuedAt, expiresAt } : null;
 }
 
-/** True when the cookie was issued more than RENEW_AFTER_MS ago. */
-export function shouldRenew(expiresAt: number, now = Date.now()): boolean {
-  return expiresAt - now < SESSION_MS - RENEW_AFTER_MS;
+/**
+ * True when re-issuing the cookie now would push its expiry out by more than
+ * RENEW_AFTER_MS — so about once a week while in use, and no more once the
+ * one-year cap is what limits it.
+ */
+export function shouldRenew(session: Session, now = Date.now()): boolean {
+  return Math.min(now + SESSION_MS, session.issuedAt + SESSION_MAX_MS) - session.expiresAt > RENEW_AFTER_MS;
+}
+
+/** Max-Age for a cookie carrying this session. */
+export function cookieMaxAge(session: Session, now = Date.now()): number {
+  return Math.max(0, Math.floor((session.expiresAt - now) / 1000));
 }
 
 export function readSessionCookie(c: Context): string | undefined {

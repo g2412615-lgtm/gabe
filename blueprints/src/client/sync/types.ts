@@ -128,6 +128,11 @@ export interface SyncEnvHandlers {
 
 export interface SyncEnv {
   isVisible(): boolean;
+  /**
+   * False only when the browser knows there's no connection (a request
+   * can't reach the server). Absent or true: it may.
+   */
+  isOnline?(): boolean;
   /** Start listening; returns a function that stops. */
   listen(handlers: SyncEnvHandlers): () => void;
 }

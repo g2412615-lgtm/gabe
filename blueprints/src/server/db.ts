@@ -1,8 +1,8 @@
 // SQLite through Node's built-in driver (node:sqlite, synchronous). One
 // connection for the whole process: every request handler runs its queries
 // and transactions to completion without awaiting in between, so nothing
-// interleaves. Render workers never touch the database — they post results
-// back and the main thread writes them.
+// interleaves. Render workers (separate processes) never touch the database
+// — they post results back and the server writes them.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -98,6 +98,12 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX comments_plan ON comments(plan_id);
   CREATE INDEX comments_circle ON comments(circle_id);
+  `,
+  // 2 — renders started for a page since it last rendered (or was retried).
+  // A page whose renderer keeps getting killed — out of memory, or the whole
+  // server going down with it — is given up on instead of retried forever.
+  `
+  ALTER TABLE pages ADD COLUMN render_attempts INTEGER NOT NULL DEFAULT 0;
   `,
 ];
 

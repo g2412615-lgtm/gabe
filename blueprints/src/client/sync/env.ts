@@ -36,6 +36,8 @@ export function browserEnv(): SyncEnv {
   const hasDom = typeof window !== "undefined" && typeof document !== "undefined";
   return {
     isVisible: () => !hasDom || document.visibilityState !== "hidden",
+    // navigator.onLine is only trustworthy when false (no network at all)
+    isOnline: () => typeof navigator === "undefined" || navigator.onLine !== false,
     listen(h) {
       if (!hasDom) return () => {};
       const onVisibility = () => (document.visibilityState === "hidden" ? h.hidden() : h.visible());

@@ -180,6 +180,52 @@ describe("plan store ⇄ real server", () => {
     await closeAll(second.store);
   });
 
+  it("leaving the editor right after an edit never undoes the other device's later edit (finding #0)", async () => {
+    const { planId, pages } = await newPlan(1);
+    const ipadStorage = new MemoryStorage();
+    const ipad = await openStore(planId, { storage: ipadStorage });
+    const c = ipad.store.addCircle({ pageId: pages[0].id, x: 0.2, y: 0.2, r: 0.05 });
+    await ipad.store.flushNow();
+    ipad.store.updateCircle(c, { x: 0.6 }); // move it…
+    void ipad.store.flushNow(); // …and tap back to the plan list (leave guard, then unmount)
+    await closeAll(ipad.store);
+    expect((await serverDoc(planId)).circles[0].x).toBe(0.6);
+    expect(ipadStorage.data.size).toBe(0); // the late reply still cleared the device outbox
+
+    const desk = await openStore(planId);
+    desk.store.updateCircle(c, { x: 0.9, title: "Gate A" });
+    await desk.store.flushNow();
+    await closeAll(desk.store);
+
+    const again = await openStore(planId, { storage: ipadStorage });
+    await again.store.flushNow();
+    expect((await serverDoc(planId)).circles[0]).toMatchObject({ x: 0.9, title: "Gate A" });
+    expect(again.store.getState().circleById.get(c)).toMatchObject({ x: 0.9, title: "Gate A" });
+    await closeAll(again.store);
+  });
+
+  it("a circle added right before leaving and deleted on the other device stays deleted (finding #0)", async () => {
+    const { planId, pages } = await newPlan(1);
+    const ipadStorage = new MemoryStorage();
+    const ipad = await openStore(planId, { storage: ipadStorage });
+    const c = ipad.store.addCircle({ pageId: pages[0].id, x: 0.3, y: 0.3, r: 0.05 });
+    ipad.store.addComment(c, "Temporary barrier");
+    await closeAll(ipad.store); // dispose's keepalive creates both
+
+    const desk = await openStore(planId);
+    desk.store.deleteCircle(c);
+    await desk.store.flushNow();
+    await closeAll(desk.store);
+
+    const again = await openStore(planId, { storage: ipadStorage });
+    await again.store.flushNow();
+    const doc = await serverDoc(planId);
+    expect(doc.circles[0].deletedAt).not.toBeNull();
+    expect(doc.circles).toHaveLength(1);
+    expect(again.store.getState().circleById.has(c)).toBe(false);
+    await closeAll(again.store);
+  });
+
   it("refreshPages merges render status from GET /pages", async () => {
     const { planId, pages } = await newPlan(1);
     const { store } = await openStore(planId);

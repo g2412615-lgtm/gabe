@@ -97,7 +97,7 @@ describe("load", () => {
     a.net.loseNextReply = true; // the request arrives, the page dies before the reply
     const id = a.store.addCircle({ pageId, x: 0.3, y: 0.3, r: 0.05 });
     await tick(DEBOUNCE_MS);
-    expect(storage.json(outboxKey(server.planId)).entries[`circle:${id}`]).toMatchObject({ base: null, sent: true });
+    expect(storage.json(outboxKey(server.planId)).entries[`circle:${id}`]).toMatchObject({ base: null, sent: { x: 0.3, y: 0.3, deletedAt: null } });
 
     const b = device(server, { storage });
     await b.store.load();

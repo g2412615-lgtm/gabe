@@ -250,7 +250,7 @@ describe("network trouble", () => {
     await tick(DEBOUNCE_MS);
     expect(d.server.circles.get(id)!.num).toBe(1); // it got there…
     expect(d.store.getState().save.state).toBe("offline"); // …but the device never heard
-    expect(d.storage.json(outboxKey(d.server.planId)).entries[`circle:${id}`].sent).toBe(true);
+    expect(d.storage.json(outboxKey(d.server.planId)).entries[`circle:${id}`].sent).toMatchObject({ x: 0.2, deletedAt: null }); // went out: may be there
     await tick(1000);
     expect(d.net.syncs[1].ops[0].base).toBeNull(); // replayed as a create
     expect(d.server.circleSeq).toBe(1);
@@ -434,7 +434,7 @@ describe("leaving the page", () => {
     d.env.hide();
     await settle();
     expect(d.store.getState().save.pending).toBe(1);
-    expect(d.storage.json(outboxKey(d.server.planId)).entries[`circle:${id}`].sent).toBe(true);
+    expect(d.storage.json(outboxKey(d.server.planId)).entries[`circle:${id}`].sent).toMatchObject({ x: 0.2 });
     d.net.failWith = null;
     d.env.show();
     await settle();

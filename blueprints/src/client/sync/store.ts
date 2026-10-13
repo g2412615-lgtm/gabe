@@ -17,7 +17,13 @@
 //
 //  - Every local change is written to the device outbox (localStorage)
 //    before anything else happens; the outbox is only trimmed once the
-//    server has confirmed a row.
+//    server has confirmed a row — also when the reply lands after the editor
+//    was closed. Before a request goes out, its rows are marked as sent, so
+//    the next visit can tell a change that may already be on the server
+//    (never replayed over a newer one) from one that never left the device.
+//  - The outbox is shared (two tabs, an editor just closed and one just
+//    opened): a store only rewrites its own pending rows and removes only
+//    entries it wrote that nobody has rewritten since.
 //  - One request at a time. A reply is merged field by field against what
 //    was *sent* (merge3(sent, docNow, server)), so edits made while the
 //    request was out survive and server-assigned values (num, cleaned text)
@@ -50,7 +56,7 @@ import { clamp, cleanPatch, cleanText, isColor, isFiniteNumber, utf8Length } fro
 import { createDeriver } from "./derive";
 import { apiTransport, browserEnv, browserStorage, globalTimers } from "./env";
 import { History, type RowChange, type Step } from "./history";
-import { parseKey, readOutbox, writeOutbox, type AnyRow, type OutboxEntry } from "./outbox";
+import { entryJson, parseKey, parseStored, readStoredText, restoreRow, writeStored, type AnyRow } from "./outbox";
 import type { CirclePatch, PlanState, PlanStore, PlanStoreOptions, SaveInfo, SaveState } from "./types";
 
 export type { CirclePatch, PlanState, PlanStore, PlanStoreOptions, SaveInfo, SaveState, StorageLike, SyncEnv, SyncTransport, Timers } from "./types";
@@ -98,6 +104,15 @@ const KINDS: readonly EntityKind[] = ["plan", "page", "circle", "comment"];
 const keyOf = (kind: EntityKind, id: ID): Key => `${kind}:${id}`;
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Plans with a store open in this tab (load() called, not disposed). The
+ * background save on the home page leaves those to their editor.
+ */
+const openPlans = new Map<string, number>();
+export function isPlanOpen(planId: string): boolean {
+  return (openPlans.get(planId) ?? 0) > 0;
+}
 
 /** HTTP status of a failed call; 0 = no connection, timeout, or a reply that wasn't what the API promises. */
 function errorStatus(e: unknown): number {
@@ -158,6 +173,15 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
   let pendingCache: PendingRow[] | null = null;
   /** Creates that went out in a request: the server may have them even though no reply said so. */
   const maybeOnServer = new Set<Key>();
+  /**
+   * Per row, the data of the last request that carried it and got no answer
+   * yet (it may have landed). Kept in the outbox as `sent`.
+   */
+  const unconfirmed = new Map<Key, Record<string, unknown>>();
+  /** The outbox entries this store wrote (or restored), as the exact text: it may remove only those, and only while unchanged. */
+  const written = new Map<Key, string>();
+  /** The outbox text this store last wrote or read, parsed (so an unchanged outbox isn't parsed again on every keystroke). */
+  let outboxCache: { text: string; entries: Map<Key, string> } | null = null;
 
   const history = new History();
   let gesture: Gesture | null = null;
@@ -187,6 +211,7 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
   let checkingMe = false;
   let disposed = false;
   let unlisten: (() => void) | null = null;
+  let registered = false;
 
   // ── timers ────────────────────────────────────────────────────────────────
 
@@ -317,6 +342,7 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
     doc[kind].delete(id);
     synced[kind].delete(id);
     maybeOnServer.delete(key);
+    unconfirmed.delete(key);
     gesture?.before.delete(key);
     ver[kind]++;
     candidates.delete(key);
@@ -385,16 +411,67 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
 
   // ── outbox ────────────────────────────────────────────────────────────────
 
+  /** The outbox entries stored right now (another tab or store may have written since this one did). */
+  function storedEntries(): Map<Key, string> {
+    const text = readStoredText(storage, planId) ?? "";
+    if (outboxCache && outboxCache.text === text) return new Map(outboxCache.entries);
+    const entries = new Map<Key, string>();
+    for (const [key, { json }] of parseStored(planId, text).entries) entries.set(key, json);
+    outboxCache = { text, entries: new Map(entries) };
+    return entries;
+  }
+
+  /**
+   * Bring the device outbox up to date: write this store's pending rows, and
+   * remove the entries it wrote whose rows the server has since confirmed
+   * (or that were undone) — unless someone else has rewritten them since
+   * (another tab, or a newer editor for this plan: theirs now). Other
+   * entries are left exactly as they are.
+   *
+   * Once disposed (the editor was closed, a newer store may own the plan
+   * now), it only removes: a late reply still trims what it confirmed, but
+   * nothing stale is written back.
+   */
   function persistOutbox() {
-    // Never before the first load (it would overwrite what the last session
-    // left), never after dispose (a newer store for this plan owns it now).
-    if (!loaded || disposed || !storage) return;
-    const entries: OutboxEntry[] = [];
-    for (const { key, kind, id } of pendingRows()) {
-      const s = synced[kind].get(id);
-      entries.push({ kind, id, local: doc[kind].get(id)!, base: s ? editableOf(kind, s) : null, sent: maybeOnServer.has(key) });
+    // never before the first load (it would mix up what the last session left)
+    if (!loaded || !storage) return;
+    const stored = storedEntries();
+    const next = new Map(stored);
+    const nextWritten = new Map(written);
+    const pending = pendingRows();
+    const pendingKeys = new Set(pending.map((p) => p.key));
+    if (!disposed) {
+      for (const { key, kind, id } of pending) {
+        const s = synced[kind].get(id);
+        const sent = unconfirmed.get(key);
+        const json = entryJson({ local: doc[kind].get(id)!, base: s ? editableOf(kind, s) : null, sent: sent ? editableOf(kind, sent) : null });
+        next.set(key, json);
+        nextWritten.set(key, json);
+      }
     }
-    const failed = !writeOutbox(storage, planId, entries) && entries.length > 0;
+    for (const [key, json] of written) {
+      if (pendingKeys.has(key)) continue; // written above (or, once disposed, left as it is)
+      if (next.get(key) === json) next.delete(key);
+      nextWritten.delete(key);
+    }
+    // a row back in sync: what went out for it no longer matters
+    for (const key of [...unconfirmed.keys()]) if (!pendingKeys.has(key)) unconfirmed.delete(key);
+
+    let same = next.size === stored.size;
+    if (same) for (const [key, json] of next) if (stored.get(key) !== json) same = false;
+    let ok = true;
+    if (!same) {
+      const plan = doc.plan.get(planId) as PlanRow | undefined;
+      const text = writeStored(storage, planId, next, plan?.name ?? null);
+      if (text === null) ok = false;
+      else outboxCache = { text, entries: next };
+    }
+    // refused: keep claiming what's still on disk, so a later write can remove it
+    if (ok) {
+      written.clear();
+      for (const [key, json] of nextWritten) written.set(key, json);
+    }
+    const failed = !ok && pending.length > 0 && !disposed;
     if (failed !== outboxFailed) {
       outboxFailed = failed;
       emit();
@@ -511,9 +588,13 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
       if (s) putRow(op.kind, op.id, s); // drop the local change, keep the last server copy
       else dropRow(op.kind, op.id); // a create the server refused never existed there
     }
-    let unconfirmed = 0;
-    for (const key of sent.keys()) if (!seen.has(key) && !rejected.has(key)) unconfirmed++;
-    return { unconfirmed, reasons };
+    let unanswered = 0;
+    for (const [key, op] of sent) {
+      if (!seen.has(key) && !rejected.has(key)) unanswered++;
+      // answered: no longer "may have landed" (unless a later request carried other data)
+      else if (unconfirmed.get(key) === op.data) unconfirmed.delete(key);
+    }
+    return { unconfirmed: unanswered, reasons };
   }
 
   // ── saving ────────────────────────────────────────────────────────────────
@@ -612,16 +693,16 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
   /** Send one request. Returns true when the server answered (even if it refused some ops). */
   async function send(chunk: SyncOp[], keepalive: boolean): Promise<boolean> {
     const sent = new Map<Key, SyncOp>(chunk.map((op) => [keyOf(op.kind, op.id), op]));
-    // Remember (on the device too) that these creates went out, before they do.
-    let marked = false;
-    for (const op of chunk) {
-      const key = keyOf(op.kind, op.id);
-      if (op.base === null && !maybeOnServer.has(key)) {
-        maybeOnServer.add(key);
-        marked = true;
+    // Remember (on the device too) what went out, before it does: if no
+    // reply is ever handled (lost, or the tab is closed first), the next
+    // visit must know this may already be on the server. When the browser
+    // knows it's offline, nothing can land.
+    if (env.isOnline?.() !== false) {
+      for (const op of chunk) {
+        const key = keyOf(op.kind, op.id);
+        unconfirmed.set(key, op.data);
+        if (op.base === null) maybeOnServer.add(key);
       }
-    }
-    if (marked) {
       pendingCache = null;
       persistOutbox();
     }
@@ -802,17 +883,21 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
     }
 
     const restored: Key[] = [];
-    for (const e of readOutbox(storage, planId)) {
-      const key = keyOf(e.kind, e.id);
+    for (const [key, { entry: e, json }] of parseStored(planId, readStoredText(storage, planId)).entries) {
+      written.set(key, json); // this store answers for it now (removed once saved or moot)
       const server = synced[e.kind].get(e.id);
       if (server) {
-        // edited here against `base`; the server may have moved on since (the other device)
-        const merged = merge3(e.kind, e.base, e.local, server);
+        // the server may have this already, or a newer value from the other device (restoreRow says which wins)
+        const merged = restoreRow(e.kind, e, server);
         if (!sameRow(merged, server)) putRow(e.kind, e.id, merged);
+        if (e.sent) unconfirmed.set(key, e.sent);
       } else if (e.kind === "circle" || e.kind === "comment") {
-        // a create that never reached the server (or whose reply was lost)
+        // a create that never reached the server (or reached it and its reply was lost)
         putRow(e.kind, e.id, e.local);
-        if (e.sent) maybeOnServer.add(key);
+        if (e.sent) {
+          maybeOnServer.add(key);
+          unconfirmed.set(key, e.sent);
+        }
       } else continue; // a page/plan the server no longer has
       restored.push(key);
     }
@@ -923,6 +1008,21 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
 
   function startListening() {
     if (!unlisten) unlisten = env.listen({ online: onOnline, hidden: onHidden, visible: onVisible });
+    if (!registered) {
+      registered = true;
+      openPlans.set(planId, (openPlans.get(planId) ?? 0) + 1);
+    }
+  }
+
+  function stopListening() {
+    unlisten?.();
+    unlisten = null;
+    if (registered) {
+      registered = false;
+      const n = (openPlans.get(planId) ?? 1) - 1;
+      if (n > 0) openPlans.set(planId, n);
+      else openPlans.delete(planId);
+    }
   }
 
   // ── gestures ──────────────────────────────────────────────────────────────
@@ -998,8 +1098,7 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
       });
       disposed = true;
       for (const s of allSlots) s.clear();
-      unlisten?.();
-      unlisten = null;
+      stopListening();
     },
 
     // ── circles ──

@@ -56,14 +56,17 @@ export function pageRoutes(deps: AppDeps) {
     return sendAsset(c, [...base, "tiles", String(Number(level)), name], ext === "png" ? "image/png" : "image/jpeg");
   });
 
-  // Re-queue a page that failed to render (a fresh asset key, so no stale image can be cached).
+  // Re-queue a page that failed to render (a fresh asset key, so no stale
+  // image can be cached). The owner asked for it, so it gets fresh attempts.
   r.post("/pages/:id/retry", (c) => {
     const id = idParam(c, "id", MSG.pageNotFound);
     const page = getPage(db, id);
     const plan = page && getPlan(db, page.planId);
     if (!page || !plan) throw new HttpError(404, MSG.pageNotFound);
     if (page.status === "failed") {
-      db.prepare("UPDATE pages SET status = 'queued', error = NULL, asset_key = ?, updated_at = ?, rev = rev + 1 WHERE id = ?").run(
+      db.prepare(
+        "UPDATE pages SET status = 'queued', error = NULL, asset_key = ?, render_attempts = 0, updated_at = ?, rev = rev + 1 WHERE id = ?",
+      ).run(
         newAssetKey(),
         Date.now(),
         id,

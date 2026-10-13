@@ -1,7 +1,7 @@
 // POST /api/login, POST /api/logout, GET /api/me
 
 import { Hono } from "hono";
-import { clientIp, mintToken, SESSION_DAYS, sessionCookie } from "../auth";
+import { clientIp, cookieMaxAge, mintToken, sessionCookie } from "../auth";
 import type { AppDeps } from "../context";
 import { HttpError, isRecord, readJson } from "../http";
 
@@ -23,8 +23,8 @@ export function authRoutes(deps: AppDeps) {
       throw new HttpError(401, "That password isn't right.");
     }
     deps.throttle.succeed(ip);
-    const { token } = mintToken(deps.secret);
-    c.header("Set-Cookie", sessionCookie(c, token, SESSION_DAYS * 86_400));
+    const session = mintToken(deps.secret);
+    c.header("Set-Cookie", sessionCookie(c, session.token, cookieMaxAge(session)));
     return c.json({ ok: true });
   });
 

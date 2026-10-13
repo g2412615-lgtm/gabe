@@ -6,7 +6,7 @@ import type { Context } from "hono";
 /** An error the owner can read. Thrown anywhere in a handler; app.onError turns it into `{ error }`. */
 export class HttpError extends Error {
   constructor(
-    readonly status: 400 | 401 | 403 | 404 | 409 | 413 | 415 | 429 | 500 | 503,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 413 | 415 | 429 | 500 | 503 | 507,
     message: string,
   ) {
     super(message);

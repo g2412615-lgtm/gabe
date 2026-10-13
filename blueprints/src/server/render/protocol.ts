@@ -1,4 +1,4 @@
-// Messages between the main thread and a render worker (types only — the
+// Messages between the server and a render worker process (types only — the
 // worker runs as plain .ts under Node's type stripping in development and
 // tests, so it may import nothing local at runtime).
 
@@ -16,9 +16,10 @@ export type WorkerMessage =
       /** Per page: the PDF's page label (when not just a number) or its bookmark title, else null. Empty when pageCount > maxPages. */
       labels: (string | null)[];
     }
-  /** The preview is on disk: the page can be shown now. */
+  /** preview.webp and thumb.webp are on disk: the page can be shown now. */
   | { type: "preview"; width: number; height: number; previewW: number; previewH: number }
   | { type: "done"; tileSize: number; maxLevel: number; minLevel: number; tileFormat: "png" | "jpeg" }
-  | { type: "error"; code: "corrupt" | "failed"; message: string };
+  /** "nospace": a write failed because the disk is full. */
+  | { type: "error"; code: "corrupt" | "failed" | "nospace"; message: string };
 
 export type FinalMessage = Extract<WorkerMessage, { type: "inspected" | "done" | "error" }>;

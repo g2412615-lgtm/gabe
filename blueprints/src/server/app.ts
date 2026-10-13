@@ -8,16 +8,18 @@ import path from "node:path";
 import { serve, type ServerType } from "@hono/node-server";
 import { Hono } from "hono";
 import {
+  cookieMaxAge,
   isSameOrigin,
   LoginThrottle,
   mintToken,
   passwordChecker,
   readSessionCookie,
   resolveSessionSecret,
-  SESSION_DAYS,
   sessionCookie,
+  sessionKey,
   shouldRenew,
   verifyToken,
+  type Session,
 } from "./auth";
 import { defaultConfig, type ServerConfig } from "./config";
 import type { AppDeps } from "./context";
@@ -30,6 +32,7 @@ import { healthRoutes } from "./routes/health";
 import { pageRoutes } from "./routes/pages";
 import { planRoutes } from "./routes/plans";
 import { serveClient } from "./static";
+import { isStorageFull, STORAGE_FULL } from "./storage";
 
 export interface AppHandle {
   app: Hono;
@@ -53,14 +56,15 @@ export function createApp(input: Partial<ServerConfig> = {}): AppHandle {
   clearTmp(dataDir);
 
   const db = openDatabase(path.join(dataDir, "app.db"));
-  const queue = new RenderQueue({ db, dataDir, timeoutMs: config.renderTimeoutMs, log });
+  const queue = new RenderQueue({ db, dataDir, timeoutMs: config.renderTimeoutMs, minFreeBytes: config.minFreeBytes, log });
   const deps: AppDeps = {
     config,
     db,
     queue,
     password: passwordChecker(config.password, config.passwordHash),
     throttle: new LoginThrottle(),
-    secret: resolveSessionSecret(config.sessionSecret, dataDir),
+    // tied to the password: changing it signs every device out
+    secret: sessionKey(resolveSessionSecret(config.sessionSecret, dataDir), config.password, config.passwordHash),
     kickRender: () => {
       if (config.render) queue.kick();
     },
@@ -83,15 +87,19 @@ export function createApp(input: Partial<ServerConfig> = {}): AppHandle {
   app.use("/api/*", async (c, next) => {
     if (!deps.password.configured) throw new HttpError(503, MSG.notConfigured);
     if (!SAFE_METHODS.has(c.req.method) && !isSameOrigin(c)) throw new HttpError(403, MSG.crossSite);
-    let renew = false;
+    let renew: Session | null = null;
     if (!PUBLIC_API.has(c.req.path)) {
-      const expiresAt = verifyToken(deps.secret, readSessionCookie(c));
-      if (expiresAt === null) throw new HttpError(401, MSG.signIn);
-      renew = shouldRenew(expiresAt) && c.req.path !== "/api/logout";
+      const session = verifyToken(deps.secret, readSessionCookie(c));
+      if (!session) throw new HttpError(401, MSG.signIn);
+      if (shouldRenew(session) && c.req.path !== "/api/logout") renew = session;
     }
     await next();
-    // Keep a device that's in use signed in: re-issue the cookie once it's a week old.
-    if (renew && c.res.status < 400) c.res.headers.append("Set-Cookie", sessionCookie(c, mintToken(deps.secret).token, SESSION_DAYS * 86_400));
+    // Keep a device that's in use signed in: re-issue the cookie about once a
+    // week (same sign-in time, so the one-year limit still applies).
+    if (renew && c.res.status < 400) {
+      const renewed = mintToken(deps.secret, Date.now(), renew.issuedAt);
+      c.res.headers.append("Set-Cookie", sessionCookie(c, renewed.token, cookieMaxAge(renewed)));
+    }
     if (!c.res.headers.has("Cache-Control")) c.res.headers.set("Cache-Control", "no-store");
   });
 
@@ -109,6 +117,8 @@ export function createApp(input: Partial<ServerConfig> = {}): AppHandle {
   app.onError((err, c) => {
     if (err instanceof HttpError) return c.json({ error: err.message }, err.status, { "Cache-Control": "no-store" });
     log.error(`${c.req.method} ${c.req.path} failed`, err);
+    // a full disk deserves a message that says so (the editor keeps unsaved work and retries)
+    if (isStorageFull(err)) return c.json({ error: STORAGE_FULL.other }, 507, { "Cache-Control": "no-store" });
     return c.json({ error: MSG.serverError }, 500, { "Cache-Control": "no-store" });
   });
   app.notFound((c) => c.json({ error: MSG.notFound }, 404, { "Cache-Control": "no-store" }));

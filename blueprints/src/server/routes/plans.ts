@@ -19,6 +19,7 @@ export function planRoutes(deps: AppDeps) {
     maxUploadBytes: config.maxUploadBytes,
     maxPagesPerFile: config.maxPagesPerFile,
     inspectTimeoutMs: config.inspectTimeoutMs,
+    minFreeBytes: config.minFreeBytes,
   };
 
   /** A plan the owner can open (exists and isn't deleted). */
@@ -79,6 +80,8 @@ export function planRoutes(deps: AppDeps) {
       }
     }
     if (sets.length) db.prepare(`UPDATE plans SET ${sets.join(", ")}, rev = rev + 1, updated_at = ? WHERE id = ?`).run(...values, now, id);
+    // A deleted plan's pages stop rendering; a restored one's go back in line.
+    if (body.deleted !== undefined) deps.kickRender();
     return c.json(getPlan(db, id));
   });
 
@@ -103,7 +106,10 @@ export function planRoutes(deps: AppDeps) {
     const body = await readJson(c, MAX_SYNC_BYTES);
     if (!isRecord(body) || !Array.isArray(body.ops)) throw new HttpError(400, MSG.badRequest);
     if (body.ops.length > MAX_SYNC_OPS) throw new HttpError(413, "Too many changes in one save.");
-    return c.json(applySync(db, id, body.ops));
+    const res = applySync(db, id, body.ops);
+    // Pages (or the plan) may have been deleted or restored: the render queue re-checks what it should work on.
+    if (body.ops.some((op) => isRecord(op) && (op.kind === "page" || op.kind === "plan"))) deps.kickRender();
+    return c.json(res);
   });
 
   return r;

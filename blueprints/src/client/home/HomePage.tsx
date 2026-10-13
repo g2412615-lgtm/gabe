@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { goToLogin } from "../router";
+import { startBackgroundSave } from "../sync";
 import type { PlanSummary } from "../../shared/types";
 import AppHeader from "../ui/AppHeader";
 import { confirmDialog } from "../ui/Dialog";
@@ -48,6 +49,9 @@ export default function HomePage() {
   const [dragging, setDragging] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // send changes an editor left on this device (closed while offline) without reopening that plan
+  useEffect(() => startBackgroundSave(), []);
 
   // keep "edited 5 min ago" honest
   useEffect(() => {

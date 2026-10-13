@@ -20,6 +20,7 @@ import { cleanFileName, cleanName, HttpError, withoutExtension } from "./http";
 import { newAssetKey } from "./render/queue";
 import { runWorker } from "./render/run-worker";
 import { getPlan, toPage, toSource } from "./repo";
+import { freeBytes, isStorageFull, STORAGE_FULL } from "./storage";
 
 export const UPLOAD_MSG = {
   tooBig: (mb: number) => `That file is over ${mb} MB. Export a smaller PDF or split the set.`,
@@ -33,7 +34,7 @@ export const UPLOAD_MSG = {
 } as const;
 
 /** sharp's default decode limit (≈ 16384 × 16384); larger images would fail at render time. */
-const MAX_IMAGE_PIXELS = 268_402_689;
+export const MAX_IMAGE_PIXELS = 268_402_689;
 
 type Sniffed = "pdf" | "png" | "jpeg";
 
@@ -51,6 +52,8 @@ export interface UploadContext {
   maxUploadBytes: number;
   maxPagesPerFile: number;
   inspectTimeoutMs: number;
+  /** Refuse an upload that would leave less than this free on the data volume. */
+  minFreeBytes: number;
 }
 
 /** Stream the request body to a temp file, stopping at the size limit. */
@@ -58,6 +61,7 @@ async function receive(req: Request, ctx: UploadContext): Promise<{ file: string
   const limitMb = Math.round(ctx.maxUploadBytes / (1024 * 1024));
   const declared = Number(req.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > ctx.maxUploadBytes) throw new HttpError(413, UPLOAD_MSG.tooBig(limitMb));
+  if (freeBytes(ctx.dataDir) < ctx.minFreeBytes + (Number.isFinite(declared) ? declared : 0)) throw new HttpError(507, STORAGE_FULL.upload);
   if (!req.body) throw new HttpError(400, UPLOAD_MSG.empty);
 
   const file = path.join(ctx.dataDir, "tmp", `upload-${randomUUID()}`);
@@ -82,6 +86,7 @@ async function receive(req: Request, ctx: UploadContext): Promise<{ file: string
     );
   } catch (e) {
     await fsp.rm(file, { force: true });
+    if (isStorageFull(e)) throw new HttpError(507, STORAGE_FULL.upload);
     throw e;
   }
   if (bytes === 0) {
@@ -110,7 +115,10 @@ async function inspectPdf(file: string, ctx: UploadContext): Promise<(string | n
 async function checkImage(file: string): Promise<void> {
   let meta: { width?: number; height?: number };
   try {
-    meta = await sharp(file).metadata();
+    // Header only. Without lifting sharp's pixel limit, an image over it
+    // throws here and would get the "couldn't be read" message, when the
+    // problem is its size (checked just below).
+    meta = await sharp(file, { limitInputPixels: false }).metadata();
   } catch {
     throw new HttpError(400, UPLOAD_MSG.badImage);
   }

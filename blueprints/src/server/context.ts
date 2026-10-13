@@ -11,7 +11,7 @@ export interface AppDeps {
   queue: RenderQueue;
   password: PasswordCheck;
   throttle: LoginThrottle;
-  /** Cookie signing secret. */
+  /** Session cookie signing key (the session secret mixed with the password setting: see auth.sessionKey). */
   secret: string;
   /** Start rendering newly queued pages (no-op when rendering is switched off). */
   kickRender(): void;

@@ -4,8 +4,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mintToken, verifyToken } from "../../src/server/auth";
+import { mintToken, sessionKey, shouldRenew, verifyToken } from "../../src/server/auth";
 import { Client, PASSWORD, signedInClient, startTestServer, tempDir, type TestServer } from "./helpers";
+
+const SECRET = "test-secret-test-secret-test-secret-0000";
+/** What the test servers sign cookies with: the secret mixed with the password. */
+const KEY = sessionKey(SECRET, PASSWORD, null);
+const DAY = 86_400_000;
 
 let server: TestServer;
 let clientDir: string;
@@ -51,7 +56,7 @@ describe("auth", () => {
     expect(ok.status).toBe(200);
     expect(ok.json).toEqual({ ok: true });
     const setCookie = ok.headers.get("set-cookie") ?? "";
-    expect(setCookie).toMatch(/^bpn_session=v1\.\d+\.[0-9a-f]{64}; Path=\/; HttpOnly; SameSite=Lax; Max-Age=15552000$/);
+    expect(setCookie).toMatch(/^bpn_session=v2\.\d+\.\d+\.[0-9a-f]{64}; Path=\/; HttpOnly; SameSite=Lax; Max-Age=15552000$/);
     expect(setCookie).not.toMatch(/Secure/); // plain http here
 
     const me = await c.get("/api/me");
@@ -69,25 +74,110 @@ describe("auth", () => {
   it("refuses tampered, expired and malformed cookies", async () => {
     const c = await signedInClient(server);
     const good = c.cookie;
-    for (const bad of [good.slice(0, -1) + (good.endsWith("0") ? "1" : "0"), "bpn_session=v1.99999999999999.abc", "bpn_session=garbage", "bpn_session="]) {
+    for (const bad of [
+      good.slice(0, -1) + (good.endsWith("0") ? "1" : "0"),
+      "bpn_session=v2.1.99999999999999.abc",
+      "bpn_session=garbage",
+      "bpn_session=",
+      // the old cookie format (before sessions were tied to the password)
+      `bpn_session=v1.${Date.now() + DAY}.${"0".repeat(64)}`,
+    ]) {
       c.cookie = bad;
       expect((await c.get("/api/me")).status).toBe(401);
     }
-    const secret = "test-secret-test-secret-test-secret-0000";
-    const expired = mintToken(secret, Date.now() - 200 * 86_400_000).token;
-    expect(verifyToken(secret, expired)).toBeNull();
+    const expired = mintToken(KEY, Date.now() - 200 * DAY).token;
+    expect(verifyToken(KEY, expired)).toBeNull();
     c.cookie = `bpn_session=${expired}`;
+    expect((await c.get("/api/me")).status).toBe(401);
+    // signed with the bare secret (not tied to the password): refused
+    c.cookie = `bpn_session=${mintToken(SECRET).token}`;
     expect((await c.get("/api/me")).status).toBe(401);
   });
 
-  it("renews a cookie that is more than a week old", async () => {
+  it("renews a cookie that is more than a week old, keeping the sign-in time", async () => {
     const c = new Client(server.url);
-    const old = mintToken("test-secret-test-secret-test-secret-0000", Date.now() - 10 * 86_400_000).token;
+    const signedIn = Date.now() - 10 * DAY;
+    const old = mintToken(KEY, signedIn).token;
     c.cookie = `bpn_session=${old}`;
     const r = await c.get("/api/me");
     expect(r.status).toBe(200);
-    expect(r.headers.get("set-cookie")).toMatch(/^bpn_session=v1\./);
+    expect(r.headers.get("set-cookie")).toMatch(/^bpn_session=v2\..*; Max-Age=15552000$/);
     expect(c.cookie).not.toBe(`bpn_session=${old}`);
+    const renewed = verifyToken(KEY, c.cookie.slice("bpn_session=".length))!;
+    expect(renewed.issuedAt).toBe(signedIn);
+    expect(renewed.expiresAt).toBeGreaterThan(Date.now() + 179 * DAY);
+    // a fresh cookie isn't re-issued on every request
+    const again = await c.get("/api/me");
+    expect(again.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("ends a sign-in after a year however often it was renewed", async () => {
+    const c = new Client(server.url);
+    // signed in 300 days ago, renewed 3 days ago: the renewal stopped at the one-year mark
+    const signedIn = Date.now() - 300 * DAY;
+    const renewed = mintToken(KEY, Date.now() - 3 * DAY, signedIn);
+    expect(renewed.expiresAt).toBe(signedIn + 365 * DAY);
+    c.cookie = `bpn_session=${renewed.token}`;
+    const r = await c.get("/api/me");
+    expect(r.status).toBe(200);
+    // re-issuing could not push the expiry out, so it isn't
+    expect(r.headers.get("set-cookie")).toBeNull();
+
+    // past the year: refused, even though this token's own expiry is still ahead
+    const longAgo = Date.now() - 366 * DAY;
+    const forged = mintToken(KEY, longAgo + 300 * DAY, longAgo);
+    expect(forged.expiresAt).toBe(longAgo + 365 * DAY);
+    expect(verifyToken(KEY, forged.token)).toBeNull();
+    c.cookie = `bpn_session=${forged.token}`;
+    expect((await c.get("/api/me")).status).toBe(401);
+  });
+
+  it("renews about once a week, and not near the one-year limit", () => {
+    const now = Date.now();
+    const fresh = mintToken(KEY, now);
+    expect(shouldRenew(fresh, now)).toBe(false);
+    expect(shouldRenew(fresh, now + 6 * DAY)).toBe(false);
+    expect(shouldRenew(fresh, now + 8 * DAY)).toBe(true);
+    // 360 days in: the expiry is already pinned at the cap
+    const late = mintToken(KEY, now + 359 * DAY, now);
+    expect(late.expiresAt).toBe(now + 365 * DAY);
+    expect(shouldRenew(late, now + 360 * DAY)).toBe(false);
+  });
+
+  it("signs every device out when the password changes", async () => {
+    const dataDir = tempDir();
+    const first = await startTestServer({ dataDir, sessionSecret: null, render: false });
+    const kept = (await signedInClient(first)).cookie;
+    await first.shutdown(1000);
+    /** The signed-in device, talking to whichever server is running now. */
+    const device = (s: TestServer) => Object.assign(new Client(s.url), { cookie: kept });
+
+    // same password, restarted: still signed in (the secret is kept in DATA_DIR)
+    const same = await startTestServer({ dataDir, sessionSecret: null, render: false });
+    expect((await device(same).get("/api/me")).status).toBe(200);
+    await same.shutdown(1000);
+
+    const changed = await startTestServer({ dataDir, sessionSecret: null, password: "a brand new password", render: false });
+    try {
+      const c = device(changed);
+      const r = await c.get("/api/me");
+      expect(r.status).toBe(401);
+      expect(r.json.error).toBe("Sign in to continue.");
+      expect((await c.login("a brand new password")).status).toBe(200);
+      expect((await c.get("/api/me")).status).toBe(200);
+    } finally {
+      await changed.stop();
+    }
+  });
+
+  it("signs every device out when the password hash changes (same password, new salt)", () => {
+    const a = sessionKey(SECRET, null, "scrypt:c2FsdA:aGFzaA");
+    expect(sessionKey(SECRET, null, "scrypt:c2FsdA:aGFzaA")).toBe(a);
+    expect(sessionKey(SECRET, null, "scrypt:b3RoZXI:aGFzaA")).not.toBe(a);
+    // the hash wins over a plain password, as it does for sign-in
+    expect(sessionKey(SECRET, "anything", "scrypt:c2FsdA:aGFzaA")).toBe(a);
+    expect(sessionKey(SECRET, PASSWORD, null)).not.toBe(sessionKey(SECRET, "other", null));
+    expect(sessionKey("another-secret-another-secret-0000", PASSWORD, null)).not.toBe(KEY);
   });
 
   it("logs out by clearing the cookie", async () => {

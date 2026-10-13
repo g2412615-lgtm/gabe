@@ -34,7 +34,8 @@ const ENV_SETUP_ERROR = "BPN_E2E_SETUP_ERROR";
 function ensureFixtures() {
   const needed = ["event-plan.pdf", "suite-level.pdf"];
   if (needed.every((f) => fs.existsSync(fixture(f)))) return;
-  execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "fixtures"], { cwd: ROOT, stdio: "inherit" });
+  const win = process.platform === "win32";
+  execFileSync(win ? "npm.cmd" : "npm", ["run", "fixtures"], { cwd: ROOT, stdio: "inherit", shell: win });
   for (const f of needed) if (!fs.existsSync(fixture(f))) throw new Error(`npm run fixtures didn't make tests/fixtures/out/${f}`);
 }
 

@@ -3,6 +3,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 import * as mupdf from "mupdf";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -73,12 +74,14 @@ describe("uploading a multi-page PDF", () => {
       expect(Math.max(p.previewW, p.previewH)).toBe(2048);
     }
     const [arch, letter, tabloid, rotated] = done;
-    expect([arch.width, arch.height]).toEqual([8000, 5334]); // ARCH D capped at 8000 px
+    // ARCH D (36×24 in): 300 DPI would be 10800×7200; capped at ~40 megapixels in all (7746×5164)
+    expect([arch.width, arch.height]).toEqual([7746, 5164]);
+    expect((arch.width * arch.height) / 1e6).toBeCloseTo(40, 0);
     expect([letter.width, letter.height]).toEqual([2550, 3300]); // 300 DPI
     expect([tabloid.width, tabloid.height]).toEqual([5100, 3300]);
     expect([rotated.width, rotated.height]).toEqual([2550, 3300]); // /Rotate 90 applied
     expect(arch.minLevel).toBe(0);
-    expect(arch.maxLevel).toBe(4); // 8000 → 4000 → 2000 → 1000 → 500 (one tile)
+    expect(arch.maxLevel).toBe(4); // 7746 → 3873 → 1937 → 969 → 485 (one tile)
     // the assetKey changed when rendering started (a fresh key per attempt)
     expect(arch.assetKey).not.toBe(pages[0].assetKey);
     // no work folders left behind
@@ -105,16 +108,16 @@ describe("uploading a multi-page PDF", () => {
     const tm = await sharp(Buffer.from(await thumb.arrayBuffer())).metadata();
     expect(Math.max(tm.width ?? 0, tm.height ?? 0)).toBe(480);
 
-    // full-resolution level: 8000×5334 → 16×11 tiles; the last one is the 320×214 corner
+    // full-resolution level: 7746×5164 → 16×11 tiles; the last one is the 66×44 corner
     const corner = await fetch(`${server.url}${base}/tiles/${p.maxLevel}/15_10.png`, { headers: { cookie: c.cookie } });
     expect(corner.status).toBe(200);
     expect(corner.headers.get("content-type")).toBe("image/png");
     const cm = await sharp(Buffer.from(await corner.arrayBuffer())).metadata();
-    expect([cm.width, cm.height]).toEqual([320, 214]);
+    expect([cm.width, cm.height]).toEqual([66, 44]);
     const one = await fetch(`${server.url}${base}/tiles/${p.minLevel}/0_0.png`, { headers: { cookie: c.cookie } });
     expect(one.status).toBe(200);
     const om = await sharp(Buffer.from(await one.arrayBuffer())).metadata();
-    expect([om.width, om.height]).toEqual([500, 334]);
+    expect([om.width, om.height]).toEqual([485, 323]);
   });
 
   it("answers 404 for bad or missing asset paths", async () => {
@@ -218,6 +221,32 @@ describe("refusing bad uploads", () => {
     const r = await c.upload(fake, { filename: "broken.png", type: "image/png" });
     expect(r.status).toBe(400);
     expect(r.json.error).toBe("That image couldn't be read. Try saving it again as a PNG or JPG.");
+  });
+
+  it("refuses an image too large to open with the message that says so", async () => {
+    // A valid PNG header for a 20000×20000 image (400 MP, over sharp's limit): only the header is read.
+    const chunk = (type: string, data: Buffer) => {
+      const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+      const len = Buffer.alloc(4);
+      len.writeUInt32BE(data.length);
+      const crc = Buffer.alloc(4);
+      crc.writeUInt32BE(zlib.crc32(body));
+      return Buffer.concat([len, body, crc]);
+    };
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(20000, 0);
+    ihdr.writeUInt32BE(20000, 4);
+    ihdr[8] = 8; // bit depth
+    ihdr[9] = 2; // RGB
+    const huge = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk("IHDR", ihdr),
+      chunk("IDAT", zlib.deflateSync(Buffer.alloc(0))),
+      chunk("IEND", Buffer.alloc(0)),
+    ]);
+    const r = await c.upload(huge, { filename: "site survey.png", type: "image/png" });
+    expect(r.status).toBe(400);
+    expect(r.json.error).toBe("That image is too large to open. Save it at a smaller size and try again.");
   });
 
   it("refuses a password-protected PDF", async () => {
