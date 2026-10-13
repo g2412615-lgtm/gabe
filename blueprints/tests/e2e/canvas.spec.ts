@@ -168,13 +168,34 @@ async function mouseDrag(page: Page, from: Pt, to: Pt, steps = 12) {
  */
 class Touch {
   private down = new Map<number, Pt>();
-  private constructor(private cdp: CDPSession) {}
+  private constructor(
+    private cdp: CDPSession,
+    private page: Page,
+  ) {}
   static async open(page: Page) {
-    return new Touch(await page.context().newCDPSession(page));
+    // Count every pointer event the page receives, so each step can wait for
+    // its touch to land: CDP resolves once the browser has sent a touch, and
+    // on a busy machine (CI) the page may handle it a frame later.
+    await page.evaluate(() => {
+      const w = window as unknown as { __ptrCount?: number };
+      if (w.__ptrCount !== undefined) return;
+      w.__ptrCount = 0;
+      for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel"])
+        document.addEventListener(type, () => void (w.__ptrCount! += 1), { capture: true, passive: true });
+    });
+    return new Touch(await page.context().newCDPSession(page), page);
   }
-  private send(type: "touchStart" | "touchMove" | "touchEnd", points = [...this.down]) {
+  private async send(type: "touchStart" | "touchMove" | "touchEnd", points = [...this.down]) {
+    const count = () => this.page.evaluate(() => (window as unknown as { __ptrCount: number }).__ptrCount);
+    const before = await count();
     const touchPoints = points.map(([id, p]) => ({ id, x: p.x, y: p.y, radiusX: 6, radiusY: 6, force: 1 }));
-    return this.cdp.send("Input.dispatchTouchEvent", { type, touchPoints });
+    await this.cdp.send("Input.dispatchTouchEvent", { type, touchPoints });
+    // wait for the page to see it (a move that changes nothing sends no event: give up after a moment)
+    await this.page
+      .waitForFunction((b) => (window as unknown as { __ptrCount: number }).__ptrCount > b, before, { timeout: 1000, polling: "raf" })
+      .catch(() => {});
+    // then let one frame run, so the canvas's own frame work (rAF) has happened too
+    await this.page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
   }
   async start(id: number, p: Pt) {
     this.down.set(id, p);
