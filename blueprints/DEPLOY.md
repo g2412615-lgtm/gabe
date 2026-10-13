@@ -20,8 +20,9 @@ them straight into the Fly.io, GitHub or Cloudflare pages below.
 
 1. Sign in at https://fly.io/dashboard.
 2. Open **Tokens**, under your organization's settings in the left menu.
-3. Create an **organization token**. A name like `github-blueprints` works.
+3. Create an **organization token**. A name like `github-blueprints` works. Don't pick an app "deploy token": that kind only works for an app that already exists.
 4. Copy the token. You'll paste it into GitHub in the next step.
+5. Note your organization's short name (its "slug"). It's in the dashboard address: `fly.io/dashboard/<slug>`. If it's `personal`, there's nothing more to do.
 
 ### 2. Give the token and your password to GitHub
 
@@ -31,7 +32,10 @@ them straight into the Fly.io, GitHub or Cloudflare pages below.
 3. Click **New repository secret** again and add:
    - **Name** `BLUEPRINTS_PASSWORD`, **Secret**: the password you want to sign in with.
    - Make it long, at least 12 characters.
-   - You'll type it once on each device. The iPad and the computer then stay signed in for six months.
+   - You'll type it once on each device. The iPad and the computer then stay signed in, as long as you keep using them.
+4. Only if your Fly organization's slug from step 1 isn't `personal`:
+   1. Open the **Variables** tab on the same page, not Secrets.
+   2. Add **Name** `FLY_ORG` with that slug as its **Value**.
 
 ### 3. Run the first deploy
 
@@ -40,9 +44,11 @@ them straight into the Fly.io, GitHub or Cloudflare pages below.
 3. Click **Run workflow** and tick **First-time setup**.
 4. Click the green **Run workflow** button.
 
-The run takes about 5 minutes. It creates the Fly app `gabeweb-blueprints` and its 3 GB storage, sets the password, builds and starts the app, and asks Fly for a certificate for `blueprints.gabeweb.com`.
+The run takes about 5 minutes. It creates the Fly app `gabeweb-blueprints` and its 10 GB storage, sets the password, builds and starts the app, and asks Fly for a certificate for `blueprints.gabeweb.com`.
 
 If **Run workflow** doesn't show up, the change that adds it hasn't been merged into the main branch yet. Merge the pull request first.
+
+Merging before this step is fine. The automatic run the merge starts just notes that the app doesn't exist yet, and stops without failing.
 
 ### 4. Point the address at the app (Cloudflare)
 
@@ -67,11 +73,11 @@ It then opens full screen like an app, without Safari's address bar.
 ## Day to day
 
 - **Updates:** anything merged into the main branch under `blueprints/` deploys by itself. Watch it in **Actions → Blueprint Notes — deploy**. If the main branch has no changes to the app, nothing happens.
-- **Change the password:**
+- **Change the password, or sign out a lost device:**
   1. Update the `BLUEPRINTS_PASSWORD` secret on GitHub.
   2. Run **Blueprint Notes — deploy** by hand. Leave "First-time setup" unticked.
 
-  Devices that are already signed in stay signed in.
+  Changing the password signs out every device, so a lost iPad loses access. Then sign in again on the devices you still have.
 - **Check it's up:** https://blueprints.gabeweb.com/api/health should show `"ok":true`.
 
 ## Backups
@@ -100,7 +106,7 @@ If you'd rather deploy from the Mac the way DeployMap is deployed:
 ```bash
 fly auth whoami
 fly apps create gabeweb-blueprints
-fly volumes create data --size 3 --region dfw -a gabeweb-blueprints
+fly volumes create data --size 10 --region dfw -a gabeweb-blueprints
 fly secrets set -a gabeweb-blueprints APP_PASSWORD='the-password-you-want'
 fly deploy -a gabeweb-blueprints --remote-only --ha=false
 fly certs add blueprints.gabeweb.com -a gabeweb-blueprints

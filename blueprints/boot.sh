@@ -23,15 +23,21 @@ if [ -n "$R2_ACCESS_KEY_ID" ] && [ -n "$R2_BUCKET" ]; then
   # plain `sleep`. The loop wakes every 5 minutes of awake time and copies
   # when the last good copy (a stamp file on the volume) is 30+ minutes old.
   # COPY, never sync: a file deleted here stays recoverable in R2.
+  # A missing, empty or garbled stamp counts as "never copied" — a bad stamp
+  # must never stop the loop (a full volume can truncate it).
   due() { # due <stamp-file> <seconds>
-    [ ! -f "$1" ] || [ $(( $(date +%s) - $(cat "$1" 2>/dev/null || echo 0) )) -ge "$2" ]
+    last=$(cat "$1" 2>/dev/null)
+    case $last in ''|*[!0-9]*) last=0 ;; esac
+    [ $(( $(date +%s) - last )) -ge "$2" ]
   }
   (
+    # keep looping whatever happens: a failed step is retried next pass
+    set +e
     while true; do
       if due "$DATA/.last-r2-copy" 1800; then
         if rclone copy "$DATA/uploads" "r2:${R2_BUCKET}/${PREFIX}/uploads" --transfers 4 --s3-no-check-bucket >/dev/null 2>&1 \
           && rclone copy "$DATA/backups" "r2:${R2_BUCKET}/${PREFIX}/db" --s3-no-check-bucket --s3-upload-cutoff 1G >/dev/null 2>&1; then
-          date +%s > "$DATA/.last-r2-copy"
+          { date +%s > "$DATA/.last-r2-copy.tmp" && mv "$DATA/.last-r2-copy.tmp" "$DATA/.last-r2-copy"; } || true
           # only after a good copy may old snapshots roll off (kept 30 days)
           rclone delete "r2:${R2_BUCKET}/${PREFIX}/db" --min-age 30d --s3-no-check-bucket >/dev/null 2>&1 || true
         else
