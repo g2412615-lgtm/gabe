@@ -22,7 +22,7 @@ them straight into the Fly.io, GitHub or Cloudflare pages below.
 2. Open **Tokens**, under your organization's settings in the left menu.
 3. Create an **organization token**. A name like `github-blueprints` works. Don't pick an app "deploy token": that kind only works for an app that already exists.
 4. Copy the token. You'll paste it into GitHub in the next step.
-5. Note your organization's short name (its "slug"). It's in the dashboard address: `fly.io/dashboard/<slug>`. If it's `personal`, there's nothing more to do.
+5. The deploy works out which Fly organization to use from the token itself. You only need its short name if the token can see more than one organization; step 2 explains.
 
 ### 2. Give the token and your password to GitHub
 
@@ -33,9 +33,9 @@ them straight into the Fly.io, GitHub or Cloudflare pages below.
    - **Name** `BLUEPRINTS_PASSWORD`, **Secret**: the password you want to sign in with.
    - Make it long, at least 12 characters.
    - You'll type it once on each device. The iPad and the computer then stay signed in for up to a year while you keep using them.
-4. Only if your Fly organization's slug from step 1 isn't `personal`:
+4. Usually nothing else is needed. If the first deploy stops with "Couldn't tell which Fly organization to use", it lists the organizations your token can see. Then:
    1. Open the **Variables** tab on the same page, not Secrets.
-   2. Add **Name** `FLY_ORG` with that slug as its **Value**.
+   2. Add a repository variable **Name** `FLY_ORG` whose **Value** is the one you want.
 
 ### 3. Run the first deploy
 

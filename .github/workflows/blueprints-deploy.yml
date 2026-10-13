@@ -40,9 +40,9 @@ jobs:
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       BLUEPRINTS_PASSWORD: ${{ secrets.BLUEPRINTS_PASSWORD }}
-      # the Fly organization the app goes in: "personal" unless the repository
-      # variable FLY_ORG names another one
-      FLY_ORG: ${{ vars.FLY_ORG || 'personal' }}
+      # the Fly organization the app goes in: the repository variable FLY_ORG
+      # if the token can see it, else the only organization the token can see
+      FLY_ORG: ${{ vars.FLY_ORG }}
     steps:
       - name: Is Fly.io connected?
         id: ready
@@ -78,7 +78,26 @@ jobs:
         if: steps.ready.outputs.go == 'true' && inputs.first_time_setup
         run: |
           if ! flyctl status -a "$FLY_APP" >/dev/null 2>&1; then
-            flyctl apps create "$FLY_APP" --org "$FLY_ORG"
+            # Ask Fly which organizations this token can see (slug → name),
+            # rather than trusting a typed-in name.
+            SLUGS=$(flyctl orgs list --json | jq -r 'if type == "object" then keys[] elif type == "array" then .[] | (.slug // .Slug // empty) else empty end')
+            echo "Fly organizations this token can see: $(echo $SLUGS)"
+            ORG=""
+            if [ -n "$FLY_ORG" ] && printf '%s\n' "$SLUGS" | grep -qx "$FLY_ORG"; then
+              ORG="$FLY_ORG"
+            elif [ "$(printf '%s\n' "$SLUGS" | grep -c .)" = "1" ]; then
+              ORG="$SLUGS"
+              [ -n "$FLY_ORG" ] && echo "::warning::FLY_ORG is '$FLY_ORG', which this token can't see; using '$ORG', the only organization it can."
+            fi
+            if [ -z "$ORG" ] && [ -z "$SLUGS" ]; then
+              ORG="${FLY_ORG:-personal}"
+              echo "::warning::Couldn't list this token's Fly organizations; trying '$ORG'."
+            fi
+            if [ -z "$ORG" ]; then
+              echo "::error::Couldn't tell which Fly organization to use. This token can see: $(echo $SLUGS). Set the repository variable FLY_ORG to one of those."
+              exit 1
+            fi
+            flyctl apps create "$FLY_APP" --org "$ORG"
           fi
           if [ "$(flyctl volumes list -a "$FLY_APP" --json | jq length)" = "0" ]; then
             flyctl volumes create data --region "$FLY_REGION" --size 10 -a "$FLY_APP" --yes
