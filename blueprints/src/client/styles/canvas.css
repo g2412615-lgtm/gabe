@@ -1,0 +1,283 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Blueprint canvas (SPEC §7.5) — the white sheet on DeployMap's dot-grid
+   canvas, circles that light up, finger-sized handles, the floating zoom
+   panel and the add-mode hint. Every gesture is handled in script, so the
+   browser is told to keep its hands off (no scrolling, page zoom, text
+   selection or long-press callout).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.bp-canvas {
+  /* fills the stage, which is position: relative */
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  contain: strict;
+  background-color: var(--canvas-bg);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 22px 22px;
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* the gesture target; nothing inside it takes pointer events (hit testing is math) */
+.bp-surface {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  cursor: grab;
+}
+.bp-surface > * {
+  pointer-events: none;
+}
+.bp-surface[data-cursor="grabbing"] {
+  cursor: grabbing;
+}
+.bp-surface[data-cursor="pointer"] {
+  cursor: pointer;
+}
+.bp-surface[data-cursor="move"] {
+  cursor: move;
+}
+.bp-surface[data-cursor="crosshair"] {
+  cursor: crosshair;
+}
+.bp-surface[data-cursor="ns-resize"] {
+  cursor: ns-resize;
+}
+.bp-surface[data-cursor="ew-resize"] {
+  cursor: ew-resize;
+}
+
+/* ── the blueprint ───────────────────────────────────────────────────── */
+
+/* white paper + shadow in screen px (a shadow inside the scaled layer would shrink with the zoom) */
+.bp-sheet {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: var(--canvas-paper);
+  box-shadow: var(--shadow-paper);
+}
+
+/* world px; one transform per frame. No will-change: a layer frozen at one
+   raster scale goes blurry when zoomed. */
+.bp-raster {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  overflow: hidden; /* trims the last row/column's seam overlap at the page edge */
+}
+.bp-preview,
+.bp-tile {
+  position: absolute;
+  display: block;
+  max-width: none;
+  -webkit-user-drag: none;
+}
+.bp-preview {
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+}
+.bp-tile {
+  opacity: 0;
+  transition: opacity var(--t-base) var(--ease);
+}
+.bp-tile.on {
+  opacity: 1;
+}
+
+/* ── circles ─────────────────────────────────────────────────────────── */
+
+.bp-annos {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+}
+.bp-anno-glow {
+  fill: none;
+  stroke-width: 14px;
+  vector-effect: non-scaling-stroke;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.bp-anno-body {
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+  transition: stroke-width var(--t-fast) var(--ease), fill var(--t-fast) var(--ease);
+}
+/* lit = hovered, selected, or lit by the editor (notes list hover). The
+   pulse runs a few times and rests: an endless one would repaint the SVG
+   every frame for as long as a circle stays selected (battery, on an iPad). */
+.bp-anno.lit .bp-anno-glow {
+  opacity: 0.85;
+  animation: bp-glow-pulse 1.6s ease-in-out 3;
+}
+.bp-anno.lit .bp-anno-body {
+  stroke-width: 3px;
+}
+@keyframes bp-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* number badge: constant 18 px pill on the circle's top edge */
+.bp-badge rect {
+  stroke: #fff;
+  stroke-width: 1.5px;
+}
+.bp-badge text {
+  fill: #fff;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* selected: dashed outer ring + four resize handles (screen px) */
+.bp-sel-ring {
+  fill: none;
+  stroke-width: 1.5px;
+  stroke-dasharray: 5 4;
+}
+.bp-handle-hit {
+  fill: transparent;
+}
+.bp-handle-dot {
+  fill: #fff;
+  stroke-width: 2px;
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.35));
+}
+
+/* add mode: the circle being dragged out */
+.bp-add-preview circle:first-child {
+  stroke-width: 2px;
+  stroke-dasharray: 6 4;
+}
+
+/* long press: a ring that expands from the finger (the "it worked" tick) */
+.bp-hold {
+  position: absolute;
+  width: 84px;
+  height: 84px;
+  margin: -42px 0 0 -42px;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 14px rgba(247, 168, 27, 0.55);
+  opacity: 0;
+  animation: bp-hold-ring 600ms var(--ease) forwards;
+}
+/* grows fast, stays bright for a moment, then fades: long enough to notice under a finger */
+@keyframes bp-hold-ring {
+  0% {
+    transform: scale(0.3);
+    opacity: 1;
+  }
+  55% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
+}
+
+/* ── zoom panel (DeployMap .zoom-controls) ───────────────────────────── */
+
+.bp-zoom {
+  position: absolute;
+  right: 14px;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  touch-action: manipulation;
+  transition: right var(--t-base) var(--ease);
+}
+.bp-zoom-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 5px;
+}
+.bp-zoom-pct {
+  min-width: 42px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── add-mode hint (DeployMap .focus-toolbar, amber border) ──────────── */
+
+.bp-hint {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 6;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 24px);
+  padding: 6px 6px 6px 12px;
+  background: var(--surface);
+  border: 1px solid rgba(247, 168, 27, 0.5);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2); /* --shadow-3 smears grey across the white sheet */
+  font-size: var(--fs-sm);
+  color: var(--text);
+  touch-action: manipulation;
+}
+.bp-hint-ring {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(247, 168, 27, 0.55);
+}
+.bp-hint-text {
+  min-width: 0;
+}
+
+@media (pointer: coarse) {
+  .bp-zoom-btn {
+    width: var(--hit);
+    height: var(--hit);
+    min-height: var(--hit);
+  }
+  .bp-zoom-pct {
+    min-width: 48px;
+  }
+  .bp-hint {
+    padding: 4px 4px 4px 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bp-anno.lit .bp-anno-glow {
+    animation: none;
+  }
+  .bp-hold {
+    animation-duration: 1ms;
+  }
+}

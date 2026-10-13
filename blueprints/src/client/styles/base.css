@@ -1,0 +1,137 @@
+/* Base elements (DeployMap globals.css:116-175, 480-516), plus what an iPad
+   needs: no page bounce, no grey tap flash, no double-tap-zoom delay. */
+
+* {
+  box-sizing: border-box;
+}
+:root {
+  color-scheme: dark;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overscroll-behavior: none;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+body {
+  background: var(--bg);
+}
+#root {
+  min-height: 100%;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: var(--track-tight);
+  line-height: var(--lh-tight);
+}
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+::selection {
+  background: rgba(247, 168, 27, 0.28);
+}
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+a {
+  color: var(--link);
+  text-decoration: none;
+  transition: color var(--t-fast) var(--ease);
+}
+@media (hover: hover) {
+  a:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+img {
+  max-width: 100%;
+}
+
+/* Taps on controls fire at once (no 300 ms wait for a possible double-tap
+   zoom); the canvas sets its own touch-action. */
+a,
+button,
+input,
+select,
+textarea,
+label,
+summary,
+[role="button"],
+[role="menuitem"],
+[role="tab"] {
+  touch-action: manipulation;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-family: var(--font);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--text-2);
+}
+
+/* small text utilities */
+.muted {
+  color: var(--muted);
+}
+.text-2 {
+  color: var(--text-2);
+}
+.caps {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+  color: var(--muted);
+}
+.error-text {
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}
+/* visible to screen readers only */
+.sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
