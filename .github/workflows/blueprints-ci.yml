@@ -1,0 +1,46 @@
+# Checks Blueprint Notes (the blueprints/ folder) on every push and pull
+# request that touches it: types, unit + server tests, production build, and
+# the browser tests on desktop and iPad-sized screens.
+name: Blueprint Notes — checks
+
+on:
+  push:
+    paths: ["blueprints/**", ".github/workflows/blueprints-ci.yml"]
+  pull_request:
+    paths: ["blueprints/**", ".github/workflows/blueprints-ci.yml"]
+
+concurrency:
+  group: blueprints-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: blueprints
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: blueprints/package-lock.json
+      - run: npm ci
+      - run: npm run fixtures
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Browser tests
+        if: hashFiles('blueprints/playwright.config.ts') != ''
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Keep the browser test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: blueprints/playwright-report
+          retention-days: 7

@@ -1,0 +1,98 @@
+# Puts Blueprint Notes online at https://blueprints.gabeweb.com (Fly.io app
+# gabeweb-blueprints). Runs by itself whenever a change to blueprints/ lands
+# on the main branch, and by hand from the Actions tab ("Run workflow").
+#
+# Needs two repository secrets (Settings → Secrets and variables → Actions):
+#   FLY_API_TOKEN        a Fly.io organization token
+#   BLUEPRINTS_PASSWORD  the password for signing in to the app
+# Until FLY_API_TOKEN exists this workflow does nothing (and doesn't fail).
+# See blueprints/DEPLOY.md for the step-by-step.
+name: Blueprint Notes — deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      first_time_setup:
+        description: "First-time setup (creates the Fly app, its storage, the password and the web address)"
+        type: boolean
+        default: false
+  push:
+    paths: ["blueprints/**"]
+
+concurrency:
+  group: blueprints-deploy
+  cancel-in-progress: false
+
+env:
+  FLY_APP: gabeweb-blueprints
+  FLY_REGION: dfw
+  HOSTNAME: blueprints.gabeweb.com
+
+jobs:
+  deploy:
+    # automatic deploys only from the default branch; manual runs from anywhere
+    if: github.event_name == 'workflow_dispatch' || github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: blueprints
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      BLUEPRINTS_PASSWORD: ${{ secrets.BLUEPRINTS_PASSWORD }}
+    steps:
+      - name: Is Fly.io connected?
+        id: ready
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::notice::FLY_API_TOKEN isn't set yet, so nothing was deployed. See blueprints/DEPLOY.md."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+        working-directory: .
+
+      - uses: actions/checkout@v4
+        if: steps.ready.outputs.go == 'true'
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: steps.ready.outputs.go == 'true'
+
+      - name: First-time setup — app, storage, password
+        if: steps.ready.outputs.go == 'true' && inputs.first_time_setup
+        run: |
+          if ! flyctl status -a "$FLY_APP" >/dev/null 2>&1; then
+            flyctl apps create "$FLY_APP"
+          fi
+          if [ "$(flyctl volumes list -a "$FLY_APP" --json | jq length)" = "0" ]; then
+            flyctl volumes create data --region "$FLY_REGION" --size 3 -a "$FLY_APP" --yes
+          fi
+          if [ -z "$BLUEPRINTS_PASSWORD" ]; then
+            echo "::error::Add the BLUEPRINTS_PASSWORD secret first (the password you'll sign in with)."
+            exit 1
+          fi
+          flyctl secrets set -a "$FLY_APP" --stage APP_PASSWORD="$BLUEPRINTS_PASSWORD"
+
+      - name: Update the password
+        if: steps.ready.outputs.go == 'true' && !inputs.first_time_setup && env.BLUEPRINTS_PASSWORD != ''
+        run: flyctl secrets set -a "$FLY_APP" --stage APP_PASSWORD="$BLUEPRINTS_PASSWORD"
+
+      - name: Deploy
+        if: steps.ready.outputs.go == 'true'
+        run: flyctl deploy -a "$FLY_APP" --remote-only --ha=false
+
+      - name: First-time setup — web address
+        if: steps.ready.outputs.go == 'true' && inputs.first_time_setup
+        run: |
+          flyctl certs add "$HOSTNAME" -a "$FLY_APP" || true
+          echo "::notice::Now add the DNS record in Cloudflare: CNAME blueprints → $FLY_APP.fly.dev (DNS only). See blueprints/DEPLOY.md."
+
+      - name: Check the app answers
+        if: steps.ready.outputs.go == 'true'
+        run: |
+          for i in $(seq 1 20); do
+            if curl -fsS "https://$FLY_APP.fly.dev/api/health" >/dev/null; then echo "The app is up."; exit 0; fi
+            sleep 6
+          done
+          echo "::error::The app didn't answer its health check after the deploy. Check 'flyctl logs -a $FLY_APP'."
+          exit 1
