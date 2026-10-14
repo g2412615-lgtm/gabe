@@ -115,10 +115,21 @@ describe("outbox", () => {
 
   it("normalizes stored rows (fills defaults, clamps, rejects rows missing their parent)", () => {
     const row = normalizeRow("circle", "c1", "p1", { ...circle, x: 3, r: 9, color: "pink", title: undefined }) as CircleRow;
-    expect(row).toMatchObject({ x: 1, r: MAX_CIRCLE_R, color: "amber", title: "" });
+    expect(row).toMatchObject({ x: 1, r: MAX_CIRCLE_R, color: "gold", title: "" });
     expect(normalizeRow("circle", "c1", "p1", { ...circle, pageId: undefined })).toBeNull();
     expect(normalizeRow("comment", "m1", "p1", { id: "m1", body: "x" })).toBeNull();
     expect(normalizeRow("comment", "m1", "p1", { id: "m1", circleId: "c1", body: "x", createdAt: 5 })).toMatchObject({ body: "x", deletedAt: null, planId: "p1" });
+  });
+
+  it("reads an outbox saved before the rebrand with today's colour names (amber → gold, purple → black)", () => {
+    const s = new MemoryStorage();
+    const old = { local: { ...circle, color: "purple" }, base: { ...sent, color: "amber" }, sent: { ...sent, color: "purple" } };
+    s.setItem(outboxKey("p1"), JSON.stringify({ v: 2, name: null, entries: { "circle:c1": old } }));
+    expect(readOutbox(s, "p1")[0]).toMatchObject({ local: { color: "black" }, base: { color: "gold" }, sent: { color: "black" } });
+    expect(normalizeRow("circle", "c1", "p1", { ...circle, color: "amber" })).toMatchObject({ color: "gold" });
+    // an unknown colour still falls back to the default, and other fields are left as stored
+    s.setItem(outboxKey("p1"), JSON.stringify({ v: 2, name: null, entries: { "circle:c1": { ...old, base: { ...sent, color: "pink" } } } }));
+    expect(readOutbox(s, "p1")[0].base).toEqual({ ...sent, color: "pink" });
   });
 });
 

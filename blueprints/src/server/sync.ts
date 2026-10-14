@@ -6,13 +6,14 @@
 //    or there is no base), so a desktop moving a circle and an iPad
 //    recolouring it both win;
 //  - values are cleaned, never rejected (clamped, capped, unknown colour →
-//    keep the current one), so one odd value can't block the whole batch;
+//    keep the current one; a pre-rebrand colour name → its new colour), so
+//    one odd value can't block the whole batch;
 //  - a field whose cleaned value equals the stored one is not a change: no
 //    rev bump, no updatedAt — replaying a batch changes nothing.
 
-import { CIRCLE_COLORS, DEFAULT_CIRCLE_COLOR, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MAX_LABEL_CHARS, MAX_PLAN_NAME_CHARS, MAX_TITLE_CHARS, MIN_CIRCLE_R } from "../shared/constants";
+import { circleColorOf, DEFAULT_CIRCLE_COLOR, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MAX_LABEL_CHARS, MAX_PLAN_NAME_CHARS, MAX_TITLE_CHARS, MIN_CIRCLE_R } from "../shared/constants";
 import { sameValue } from "../shared/merge";
-import { EDITABLE, type CircleColor, type EntityKind, type ID, type PlanRows, type SyncResponse } from "../shared/types";
+import { EDITABLE, type EntityKind, type ID, type PlanRows, type SyncResponse } from "../shared/types";
 import { tx, type Db } from "./db";
 import { cleanName, cleanText, isId, isRecord } from "./http";
 import { toCircle, toComment, toPage, toPlan } from "./repo";
@@ -50,7 +51,6 @@ const REASON = {
 const DAY = 86_400_000;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
-const isColor = (v: unknown): v is CircleColor => typeof v === "string" && Object.prototype.hasOwnProperty.call(CIRCLE_COLORS, v);
 
 /** The client's createdAt when believable (last 30 days, at most a day ahead), else the server's now. */
 function createdAtFrom(v: unknown, now: number): number {
@@ -74,7 +74,7 @@ function cleanField(field: string, v: unknown, current: unknown, now: number): u
     case "r":
       return isFiniteNumber(v) ? clamp(v, MIN_CIRCLE_R, MAX_CIRCLE_R) : undefined;
     case "color":
-      return isColor(v) ? v : undefined;
+      return circleColorOf(v); // "amber"/"purple" from an old device → "gold"/"black"; unknown → left alone
     case "sortOrder":
       return isFiniteNumber(v) ? v : undefined;
     case "title":
@@ -215,7 +215,7 @@ function createCircle(db: Db, planId: string, op: ParsedOp, now: number): string
     clamp(d.x, 0, 1),
     clamp(d.y, 0, 1),
     clamp(d.r, MIN_CIRCLE_R, MAX_CIRCLE_R),
-    isColor(d.color) ? d.color : DEFAULT_CIRCLE_COLOR,
+    circleColorOf(d.color) ?? DEFAULT_CIRCLE_COLOR,
     cleanText(d.title, MAX_TITLE_CHARS) ?? "",
     num,
     createdAtFrom(d.createdAt, now),

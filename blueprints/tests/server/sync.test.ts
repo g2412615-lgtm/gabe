@@ -40,7 +40,7 @@ function circleCreate(pageId: string, over: Partial<CircleRow> = {}): SyncOp {
     kind: "circle",
     id,
     base: null,
-    data: { pageId, x: 0.25, y: 0.5, r: 0.02, color: "amber", title: "", createdAt: Date.now(), deletedAt: null, ...over },
+    data: { pageId, x: 0.25, y: 0.5, r: 0.02, color: "gold", title: "", createdAt: Date.now(), deletedAt: null, ...over },
   };
 }
 
@@ -112,7 +112,7 @@ describe("editing", () => {
     const move: SyncOp = { kind: "circle", id: created.id, base, data: { ...base, x: 0.7, y: 0.1 } };
     const recolour: SyncOp = { kind: "circle", id: created.id, base, data: { ...base, color: "red" } };
     const r1 = await sync(planId, [move]);
-    expect(r1.json.rows.circles[0]).toMatchObject({ x: 0.7, y: 0.1, color: "amber", rev: 2 });
+    expect(r1.json.rows.circles[0]).toMatchObject({ x: 0.7, y: 0.1, color: "gold", rev: 2 });
     const r2 = await sync(planId, [recolour]);
     expect(r2.json.rows.circles[0]).toMatchObject({ x: 0.7, y: 0.1, color: "red", rev: 3 });
 
@@ -135,7 +135,7 @@ describe("editing", () => {
     const { planId, pages } = await newPlan(1);
     const created = (await sync(planId, [circleCreate(pages[0].id, { x: 1.7, y: -3, r: 5, color: "pink" as never, title: "x".repeat(500) })])).json.rows
       .circles[0];
-    expect(created).toMatchObject({ x: 1, y: 0, r: MAX_CIRCLE_R, color: "amber" });
+    expect(created).toMatchObject({ x: 1, y: 0, r: MAX_CIRCLE_R, color: "gold" });
     expect(created.title).toHaveLength(MAX_TITLE_CHARS);
 
     const base = editable(created);
@@ -145,7 +145,7 @@ describe("editing", () => {
     const after = r.json.rows.circles[0];
     // bad numbers keep the current value, r is clamped, an unknown colour keeps the current one,
     // titles are not trimmed (they autosave while being typed), a non-number deletedAt is ignored
-    expect(after).toMatchObject({ x: 1, y: 0, r: MIN_CIRCLE_R, color: "amber", title: "Gate A ", deletedAt: null });
+    expect(after).toMatchObject({ x: 1, y: 0, r: MIN_CIRCLE_R, color: "gold", title: "Gate A ", deletedAt: null });
     expect(r.json.rejected).toEqual([]);
 
     // page labels and plan names are trimmed and collapsed; a blank one keeps the old value
@@ -200,6 +200,57 @@ describe("editing", () => {
     expect(r.status).toBe(200);
     expect(r.json.rows.circles.map((x) => x.id)).toEqual([good.id]);
     expect(r.json.rejected.map((x) => x.id)).toEqual(["bad id with spaces", "ok-id-1"]);
+  });
+});
+
+// Before the Kilowatt Events rebrand the palette had "amber" and "purple"
+// (now "gold" and "black"). A tab left open on the old app, or a device's
+// unsaved outbox, still sends those names; they save as the colour meant.
+describe("pre-rebrand colour names", () => {
+  it("a create in amber or purple is saved as gold or black", async () => {
+    const { planId, pages } = await newPlan(1);
+    const amber = circleCreate(pages[0].id, { color: "amber" as never });
+    const purple = circleCreate(pages[0].id, { color: "purple" as never });
+    const r = await sync(planId, [amber, purple]);
+    expect(r.json.rejected).toEqual([]);
+    const byId = new Map(r.json.rows.circles.map((x) => [x.id, x]));
+    expect(byId.get(amber.id)).toMatchObject({ color: "gold", rev: 1 });
+    expect(byId.get(purple.id)).toMatchObject({ color: "black", rev: 1 });
+  });
+
+  it("a recolour to an old name lands as the new colour; an old name for the stored colour is no change", async () => {
+    const { planId, pages } = await newPlan(1);
+    const created = (await sync(planId, [circleCreate(pages[0].id, { color: "red" })])).json.rows.circles[0];
+    const base = editable(created);
+
+    const toPurple = await sync(planId, [{ kind: "circle", id: created.id, base, data: { ...base, color: "purple" } }]);
+    expect(toPurple.json.rows.circles[0]).toMatchObject({ color: "black", rev: 2 });
+
+    // the old app thinks the circle is purple and only moves it: the colour stands
+    const oldBase = { ...editable(toPurple.json.rows.circles[0]), color: "purple" };
+    const move = await sync(planId, [{ kind: "circle", id: created.id, base: oldBase, data: { ...oldBase, x: 0.9 } }]);
+    expect(move.json.rows.circles[0]).toMatchObject({ x: 0.9, color: "black", rev: 3 });
+
+    // sending "purple" for a black circle (no base: every field counts) changes nothing — no rev bump
+    const same = await sync(planId, [{ kind: "circle", id: created.id, base: null, data: { ...oldBase, x: 0.9 } }]);
+    expect(same.json.rows.circles[0]).toMatchObject({ x: 0.9, color: "black", rev: 3 });
+    expect(same.json.rows.circles[0].updatedAt).toBe(move.json.rows.circles[0].updatedAt);
+
+    const toAmber = await sync(planId, [{ kind: "circle", id: created.id, base: oldBase, data: { ...oldBase, x: 0.9, color: "amber" } }]);
+    expect(toAmber.json.rows.circles[0]).toMatchObject({ x: 0.9, color: "gold", rev: 4 });
+    expect((await getDoc(planId)).circles.find((x) => x.id === created.id)).toMatchObject({ color: "gold", rev: 4 });
+  });
+
+  it("an unknown name still keeps the current colour (or the default for a new circle)", async () => {
+    const { planId, pages } = await newPlan(1);
+    const fresh = (await sync(planId, [circleCreate(pages[0].id, { color: "orange" as never })])).json.rows.circles[0];
+    expect(fresh.color).toBe("gold");
+    const created = (await sync(planId, [circleCreate(pages[0].id, { color: "blue" })])).json.rows.circles[0];
+    const base = editable(created);
+    for (const color of ["Amber", "constructor", "__proto__", 7, null]) {
+      const r = await sync(planId, [{ kind: "circle", id: created.id, base, data: { ...base, color } }]);
+      expect(r.json.rows.circles[0], String(color)).toMatchObject({ color: "blue", rev: 1 });
+    }
   });
 });
 

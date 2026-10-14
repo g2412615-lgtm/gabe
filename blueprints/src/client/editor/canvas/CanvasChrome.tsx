@@ -9,7 +9,7 @@ import { useMediaQuery } from "../../ui/media";
 
 function Glyph({ children }: { children: ReactNode }) {
   return (
-    <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" strokeLinejoin="miter" aria-hidden="true">
       {children}
     </svg>
   );
@@ -72,11 +72,15 @@ export function AddHint({ topInset, rightInset, onCancel }: { topInset: number; 
   // Word it for the hand that's holding the device.
   const coarse = useMediaQuery("(pointer: coarse)");
   return (
-    <div className="bp-hint" role="status" style={{ top: 12 + topInset, left: `calc((100% - ${rightInset}px) / 2)` }}>
+    <div
+      className="bp-hint"
+      role="status"
+      style={{ top: 12 + topInset, left: `calc((100% - ${rightInset}px) / 2)`, maxWidth: `calc(100% - ${rightInset + 24}px)` }}
+    >
       <span className="bp-hint-ring" aria-hidden="true" />
       <span className="bp-hint-text">{coarse ? "Tap" : "Click"} the blueprint to add a circle — drag to size it</span>
       {onCancel && (
-        <button type="button" className="small" onClick={onCancel}>
+        <button type="button" className="small bp-hint-cancel" onClick={onCancel}>
           Cancel
         </button>
       )}

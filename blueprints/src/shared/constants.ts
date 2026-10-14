@@ -18,19 +18,40 @@ export const UPLOAD_ACCEPT = ".pdf,.png,.jpg,.jpeg,application/pdf,image/png,ima
 export const PURGE_AFTER_DAYS = 30;
 
 /**
- * Circle colours. Strokes are deep enough to read on white paper (the brand
- * amber #f7a81b alone is too light on white); fills are translucent so the
- * blueprint stays readable underneath.
+ * Circle colours: the Kilowatt Events palette — KW Gold, black, and the brand
+ * kit's red (risk), blue (info) and green (ok). Circles are drawn on white
+ * paper, so every stroke is dark enough to read on white: gold's stroke is
+ * black (gold lines on white don't read), and gold shows as a highlighter
+ * fill instead. Other fills are translucent so the blueprint stays readable
+ * underneath.
  */
 export const CIRCLE_COLORS: Record<CircleColor, { label: string; stroke: string; fill: string; glow: string }> = {
-  amber: { label: "Amber", stroke: "#e8900c", fill: "rgba(247, 168, 27, 0.16)", glow: "rgba(247, 168, 27, 0.55)" },
-  red: { label: "Red", stroke: "#e5484d", fill: "rgba(229, 72, 77, 0.14)", glow: "rgba(229, 72, 77, 0.5)" },
-  blue: { label: "Blue", stroke: "#2f7fe6", fill: "rgba(47, 127, 230, 0.14)", glow: "rgba(47, 127, 230, 0.5)" },
-  green: { label: "Green", stroke: "#1f9d55", fill: "rgba(31, 157, 85, 0.14)", glow: "rgba(31, 157, 85, 0.5)" },
-  purple: { label: "Purple", stroke: "#8b5cf6", fill: "rgba(139, 92, 246, 0.14)", glow: "rgba(139, 92, 246, 0.5)" },
+  gold: { label: "Gold", stroke: "#000000", fill: "rgba(254, 224, 0, 0.38)", glow: "rgba(254, 224, 0, 0.75)" },
+  black: { label: "Black", stroke: "#000000", fill: "rgba(0, 0, 0, 0.08)", glow: "rgba(0, 0, 0, 0.35)" },
+  red: { label: "Red", stroke: "#c21f1f", fill: "rgba(194, 31, 31, 0.12)", glow: "rgba(194, 31, 31, 0.45)" },
+  blue: { label: "Blue", stroke: "#1f4e99", fill: "rgba(31, 78, 153, 0.12)", glow: "rgba(31, 78, 153, 0.45)" },
+  green: { label: "Green", stroke: "#1f7a3a", fill: "rgba(31, 122, 58, 0.12)", glow: "rgba(31, 122, 58, 0.45)" },
 };
-export const CIRCLE_COLOR_ORDER: CircleColor[] = ["amber", "red", "blue", "green", "purple"];
-export const DEFAULT_CIRCLE_COLOR: CircleColor = "amber";
+export const CIRCLE_COLOR_ORDER: CircleColor[] = ["gold", "black", "red", "blue", "green"];
+export const DEFAULT_CIRCLE_COLOR: CircleColor = "gold";
+
+/**
+ * Colour names from before the rebrand → today's. Stored circles were renamed
+ * by schema migration 3 (src/server/db.ts); this keeps changes still carrying
+ * an old name (a tab left open on the old app, a device's unsaved outbox)
+ * saving as the colour that was meant. Never remove an entry.
+ */
+export const LEGACY_CIRCLE_COLORS: ReadonlyMap<string, CircleColor> = new Map<string, CircleColor>([
+  ["amber", "gold"],
+  ["purple", "black"],
+]);
+
+/** The circle colour `v` names — a legacy name counts as its new colour — or undefined when it names none. */
+export function circleColorOf(v: unknown): CircleColor | undefined {
+  if (typeof v !== "string") return undefined;
+  if (Object.prototype.hasOwnProperty.call(CIRCLE_COLORS, v)) return v as CircleColor;
+  return LEGACY_CIRCLE_COLORS.get(v);
+}
 
 /** Circle radius limits, as a fraction of the page's long side. */
 export const MIN_CIRCLE_R = 0.0015;

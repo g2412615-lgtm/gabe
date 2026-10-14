@@ -3,6 +3,8 @@ import { useRoute, Link } from "./router";
 import HomePage from "./home/HomePage";
 import EditorPage from "./editor/EditorPage";
 import LoginPage from "./auth/LoginPage";
+import AppHeader from "./ui/AppHeader";
+import EmptyArt from "./ui/EmptyArt";
 import Toaster from "./ui/Toaster";
 import { APP_NAME } from "../shared/constants";
 
@@ -19,17 +21,21 @@ export default function App() {
       {route.name === "plan" && <EditorPage key={route.planId} planId={route.planId} initialPageId={route.pageId} initialCircleId={route.circleId} />}
       {route.name === "login" && <LoginPage next={route.next} />}
       {route.name === "notFound" && (
-        <main className="page">
-          <div className="empty">
-            <h3>Page not found</h3>
-            <p>That address doesn't match anything here.</p>
-            <div className="empty-actions">
-              <Link to="/" className="btn primary">
-                Back to event plans
-              </Link>
+        <>
+          <AppHeader wide />
+          <main className="page wide not-found">
+            <div className="empty">
+              <EmptyArt />
+              <h1>Page not found</h1>
+              <p>That address doesn't match anything here.</p>
+              <div className="empty-actions">
+                <Link to="/" className="btn primary">
+                  Back to event plans
+                </Link>
+              </div>
             </div>
-          </div>
-        </main>
+          </main>
+        </>
       )}
       <Toaster />
     </>

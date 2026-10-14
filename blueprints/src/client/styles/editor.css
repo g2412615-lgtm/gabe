@@ -1,8 +1,10 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   Editor shell (SPEC §7.6) — DeployMap's editor chrome: a surface header
-   with segmented wells, a side panel of pages, the dot-grid canvas, and a
+   Editor shell (SPEC §7.6) in the Kilowatt Events look (docs/BRAND.md):
+   a compact gold header band with black content, a white side panel of
+   pages and notes built from rules (not boxes), the flat canvas, and a
    comments panel that floats over the blueprint's right edge (it never
-   squeezes the canvas). On an iPad every control is a finger-sized target,
+   squeezes the canvas). Square corners; gold only as the accent; text on
+   gold always black. On an iPad every control is a finger-sized target,
    the page list becomes a drawer below 900 px, and the comments panel a
    bottom sheet on phone widths.
    ═══════════════════════════════════════════════════════════════════════ */
@@ -18,7 +20,10 @@
   background: var(--bg);
 }
 
-/* ── header ──────────────────────────────────────────────────────────── */
+/* ── header: the gold band ───────────────────────────────────────────────
+   KW Gold in both themes, everything on it black. Hover and "on" turn a
+   control black with gold content (gold on gold wouldn't show), and the
+   focus ring is black. */
 
 .ed-header {
   position: relative;
@@ -28,68 +33,146 @@
   align-items: center;
   gap: 8px;
   min-height: calc(56px + env(safe-area-inset-top, 0px));
-  padding: env(safe-area-inset-top, 0px) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px));
-  background: var(--surface);
-  border-bottom: 1px solid var(--border-subtle);
+  padding: env(safe-area-inset-top, 0px) max(14px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
+  background: var(--kw-gold);
+  color: #000;
+}
+.ed-header :focus-visible {
+  outline: 2px solid #000;
+  outline-offset: 2px;
+}
+.ed-header button,
+.ed-header button.ghost {
+  color: #000;
+  background: transparent;
+  border-color: transparent;
 }
 .ed-header .icon-btn {
   width: 32px;
   height: 32px;
   padding: 0;
-  border-radius: 8px;
+  border-radius: 0;
+}
+/* a menu that's open (help) */
+.ed-header button.toggled,
+.ed-header button.ghost.toggled {
+  background: #000;
+  border-color: #000;
+  color: var(--kw-gold);
+}
+@media (hover: hover) {
+  .ed-header button.ghost:hover:not(:disabled),
+  .ed-header button.toggled:hover:not(:disabled) {
+    background: #000;
+    border-color: #000;
+    color: var(--kw-gold);
+  }
+}
+
+/* the logo: the lockup where there's room, the bulb otherwise — one or the other, never both */
+.ed-logo {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+}
+.ed-logo .logo-lockup .logo-img {
+  height: 28px; /* ~105 px wide: above the lockup's 75 px minimum */
+  width: auto;
+}
+.ed-logo .logo-bulb .logo-img {
+  height: 30px;
+  width: auto;
+}
+.ed-logo .logo-lockup {
+  display: none;
+}
+@media (min-width: 1280px) {
+  .ed-logo .logo-lockup {
+    display: inline-flex;
+  }
+  .ed-logo .logo-bulb {
+    display: none;
+  }
 }
 
 .ed-back {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   height: 32px;
-  padding: 0 10px 0 6px;
-  border-radius: var(--r-sm);
-  color: var(--text-2);
+  padding: 0 10px 0 7px;
+  border-radius: 0;
+  color: #000;
   font-size: var(--fs-sm);
+  font-weight: 700;
   flex: none;
 }
 @media (hover: hover) {
   .ed-back:hover {
-    background: var(--surface-2);
-    color: var(--text);
+    background: #000;
+    color: var(--kw-gold);
     text-decoration: none;
   }
 }
 
-/* plan name: DeployMap's inline rename, with the title's divider */
+/* plan name: the inline rename, after the brand's 2px black divider */
 .ed-title {
   display: flex;
   align-items: center;
-  flex: 0 1 300px;
+  flex: 0 1 320px;
   min-width: 90px;
-  padding: 0 10px 0 6px;
-  margin-right: 2px;
-  border-right: 1px solid var(--border);
+  margin-right: 6px;
 }
-.ed-title .model-name-input {
+.ed-title::before {
+  content: "";
+  flex: none;
+  width: 2px;
+  height: 20px;
+  margin: 0 12px 0 2px;
+  background: #000;
+}
+.ed-header .model-name-input {
   width: 100%;
   min-width: 0;
-  letter-spacing: var(--track-tight);
+  color: #000;
+  font-family: var(--font-head);
+  font-weight: 800;
+  letter-spacing: 0;
   text-overflow: ellipsis;
+}
+.ed-header .model-name-input::placeholder {
+  color: rgba(0, 0, 0, 0.55);
+}
+@media (hover: hover) {
+  .ed-header .model-name-input:hover {
+    border-color: #000 !important;
+  }
+}
+/* editing: a white field with a black edge, in both themes */
+.ed-header .model-name-input:focus {
+  background: #fff !important;
+  color: #000;
+  border-color: #000 !important;
+  box-shadow: 0 0 0 1px #000 !important;
 }
 .ed-title-skel.skeleton {
   width: 180px;
   height: 18px;
-  border-radius: 6px;
+  border-radius: 0;
+}
+.ed-header .skeleton {
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.08) 25%, rgba(0, 0, 0, 0.16) 50%, rgba(0, 0, 0, 0.08) 75%);
+  background-size: 200% 100%;
 }
 
 /* sidebar toggle + ‹ Page 2 of 6 · label › */
 .ed-pager {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
   flex: 0 1 auto;
-}
-.ed-side-btn.on {
-  color: var(--text);
 }
 .ed-pages {
   display: flex;
@@ -97,7 +180,7 @@
   gap: 2px;
   min-width: 0;
 }
-button.ed-page-name {
+.ed-header button.ed-page-name {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -107,15 +190,15 @@ button.ed-page-name {
   height: 32px;
   padding: 0 8px;
   border-color: transparent;
-  border-radius: 8px;
+  border-radius: 0;
   background: transparent;
   box-shadow: none;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .ed-page-num {
   flex: none;
-  color: var(--text);
-  font-weight: 600;
+  color: inherit;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 .ed-pn-short {
@@ -126,15 +209,14 @@ button.ed-page-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--muted);
+  color: inherit;
+  font-weight: 400;
 }
 @media (hover: hover) {
-  button.ed-page-name:hover:not(:disabled) {
-    background: var(--surface-2);
-    border-color: transparent;
-  }
-  button.ed-page-name:hover .ed-page-label {
-    color: var(--text-2);
+  .ed-header button.ed-page-name:hover:not(:disabled) {
+    background: #000;
+    border-color: #000;
+    color: var(--kw-gold);
   }
 }
 
@@ -153,22 +235,86 @@ button.ed-page-name {
   padding: 0 9px;
 }
 
-/* the "?" menu: DeployMap's .shortcut-list, in two sections */
+/* the tool groups: a 1px black frame; the tool that's on is a black chip with gold content */
+.ed-header .hdr-group {
+  border-color: #000;
+  background: transparent;
+}
+.ed-header .hdr-group > button {
+  color: #000;
+}
+.ed-header .hdr-group button[aria-pressed="true"] {
+  background: #000 !important;
+  color: var(--kw-gold);
+  box-shadow: none;
+}
+@media (hover: hover) {
+  .ed-header .hdr-group > button:hover:not(:disabled) {
+    background: #000;
+    color: var(--kw-gold);
+  }
+}
+
+/* save status: a small square tag. Saved / saving: black on the gold;
+   offline: a black chip with gold text; not saved / signed out: red, white text */
+.ed-header .save-status {
+  height: 28px;
+  padding: 0 9px 0 8px;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid #000;
+  color: #000;
+  font-size: 12px;
+  font-weight: 700;
+}
+.ed-header .save-status::before,
+.ed-header .save-status.saving::before,
+.ed-header .save-status.dirty::before {
+  background: currentColor;
+}
+.ed-header .save-status.dirty {
+  background: #000;
+  border-color: #000;
+  color: var(--kw-gold);
+}
+.ed-header .save-status.error {
+  background: #c21f1f;
+  border-color: #c21f1f;
+  color: #fff;
+}
+@media (hover: hover) {
+  .ed-header button.save-status:hover:not(:disabled),
+  .ed-header button.save-status.saved:hover:not(:disabled),
+  .ed-header button.save-status.saving:hover:not(:disabled),
+  .ed-header button.save-status.dirty:hover:not(:disabled) {
+    background: #000;
+    border-color: #000;
+    color: var(--kw-gold);
+  }
+  .ed-header button.save-status.error:hover:not(:disabled) {
+    background: #a51919;
+    border-color: #a51919;
+    color: #fff;
+  }
+}
+
+/* the "?" menu: the shortcuts, in sections split by hairlines */
 .ed-help-pop {
   width: 340px;
 }
 .ed-help-sec + .ed-help-sec {
-  margin-top: 10px;
-  padding-top: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid var(--border);
 }
 .ed-help-h {
-  margin: 0 0 7px;
-  font-size: 11px;
-  font-weight: 600;
+  margin: 0 0 8px;
+  font-family: var(--font-head);
+  font-size: 12px;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--muted);
+  letter-spacing: var(--track-caps);
+  color: var(--text);
 }
 /* one grid for all rows, so the descriptions line up at the widest key */
 .ed-help-list {
@@ -177,7 +323,7 @@ button.ed-page-name {
   grid-template-columns: max-content 1fr;
   gap: 6px 16px;
   align-items: baseline;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.35;
 }
 .ed-help-row {
@@ -185,6 +331,7 @@ button.ed-page-name {
 }
 .ed-help-row dt {
   color: var(--text);
+  font-weight: 700;
   white-space: nowrap;
 }
 .ed-help-row dt kbd + kbd {
@@ -195,21 +342,33 @@ button.ed-page-name {
   color: var(--text-2);
 }
 
-/* "Signed out" strip under the header (DeployMap's .editor-banner) */
+/* "Signed out" under the header: the brand's status callout (soft gold,
+   a 6px gold bar) with a red badge */
 .editor-banner {
   flex: none;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 9px max(14px, env(safe-area-inset-right, 0px)) 9px max(14px, env(safe-area-inset-left, 0px));
-  background: var(--danger-soft);
-  border-bottom: 1px solid rgba(242, 109, 118, 0.35);
-  color: #fecaca;
-  font-size: 13px;
+  padding: 10px max(14px, env(safe-area-inset-right, 0px)) 10px max(14px, env(safe-area-inset-left, 0px));
+  background: var(--accent-soft);
+  border-left: 6px solid var(--kw-gold);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--fs-sm);
   line-height: var(--lh-ui);
 }
 .editor-banner b {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 4px 7px;
+  background: #c21f1f;
   color: #fff;
+  font-family: var(--font-head);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 .editor-banner button {
   margin-left: auto;
@@ -233,9 +392,7 @@ button.ed-page-name {
   overflow: hidden;
   display: grid;
   place-items: center;
-  background-color: var(--canvas-bg);
-  background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
-  background-size: 22px 22px;
+  background: var(--canvas-bg);
 }
 /* (phone widths: the canvas lifts its zoom buttons above the comments sheet — EditorPage passes it bottomInset) */
 
@@ -250,7 +407,7 @@ button.ed-page-name {
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border-right: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border);
   padding-left: env(safe-area-inset-left, 0px);
 }
 .ed-left.rail {
@@ -259,7 +416,7 @@ button.ed-page-name {
   gap: 6px;
   padding-top: 10px;
 }
-/* below 900 px: a drawer over the blueprint */
+/* below 900 px: a drawer over the blueprint (floating: it gets the shadow) */
 .ed-left.drawer {
   position: absolute;
   top: 0;
@@ -281,7 +438,7 @@ button.ed-page-name {
   position: absolute;
   inset: 0;
   z-index: 25;
-  background: rgba(5, 6, 8, 0.5);
+  background: rgba(0, 0, 0, 0.45);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--t-base) var(--ease);
@@ -291,35 +448,40 @@ button.ed-page-name {
   pointer-events: auto;
 }
 
+/* tabs on a hairline: bold labels, a 4px gold underline on the open one */
 .ps-top {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 8px 10px 10px;
-  border-bottom: 1px solid var(--border-subtle);
+  gap: 4px;
+  padding: 0 6px 0 0;
+  border-bottom: 1px solid var(--border);
 }
-.ps-tabs {
+.ps-tabs.evtabs {
   flex: 1 1 auto;
   min-width: 0;
+  align-self: stretch;
+  box-shadow: none;
 }
 .ps-tabs .evtab {
   flex: 1 1 0;
   justify-content: center;
   min-width: 0;
+  height: 48px;
+  font-size: var(--fs-sm);
 }
 .ps-tabs .evtab svg {
   color: var(--muted);
 }
 .ps-tabs .evtab[aria-selected="true"] svg {
-  color: var(--text-2);
+  color: var(--text);
 }
 .ps-collapse {
   flex: none;
   width: 32px;
   height: 32px;
   padding: 0;
-  border-radius: 8px;
+  border-radius: 0;
 }
 .ps-body {
   flex: 1 1 auto;
@@ -327,10 +489,10 @@ button.ed-page-name {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 8px;
+  padding: 0;
 }
 .ps-none {
-  margin: 12px 8px;
+  margin: 16px 14px;
   color: var(--muted);
   font-size: var(--fs-sm);
 }
@@ -339,18 +501,16 @@ button.ed-page-name {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid var(--border-subtle);
+  padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border);
 }
 .ps-add.dropzone {
   padding: 8px 12px;
-  border-radius: var(--r-md);
-  background: var(--surface);
+  background: transparent;
 }
 .ps-add.dropzone .dz-icon {
   width: 32px;
   height: 32px;
-  border-radius: 9px;
 }
 .ps-add.dropzone strong {
   font-size: var(--fs-sm);
@@ -373,25 +533,25 @@ button.ed-page-name {
   font-size: var(--fs-xs);
 }
 
-/* one page: thumbnail, label (two lines), status; ⋯ on the right */
+/* the pages: a ruled list — thumbnail, label (two lines), status; ⋯ on the
+   right. The open page: a 6px gold bar on a soft gold fill. */
 .ps-pages {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 .ps-page {
   position: relative;
   display: flex;
   align-items: center;
-  border-radius: 9px;
+  border-bottom: 1px solid var(--border);
   transition: background-color var(--t-fast) var(--ease);
 }
 .ps-page.active {
-  background: var(--surface-3);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 6px 0 0 var(--kw-gold);
 }
 button.ps-open,
 .ps-open {
@@ -400,11 +560,11 @@ button.ps-open,
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 10px;
+  gap: 12px;
   height: auto;
-  padding: 6px 4px 6px 8px;
+  padding: 10px 4px 10px 14px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 0;
   background: transparent;
   box-shadow: none;
   color: var(--text);
@@ -419,6 +579,7 @@ button.ps-open,
   button.ps-open:hover:not(:disabled) {
     background: transparent;
     border-color: transparent;
+    color: var(--text);
   }
 }
 .ps-thumb {
@@ -428,9 +589,12 @@ button.ps-open,
   display: grid;
   place-items: center;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--canvas-paper);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
+}
+.ps-page.active .ps-thumb {
+  border-color: var(--border-strong);
 }
 .ps-thumb img {
   display: block;
@@ -455,13 +619,13 @@ button.ps-open,
   overflow: hidden;
   overflow-wrap: anywhere;
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.3;
 }
 .ps-index {
   margin-right: 6px;
-  color: var(--muted);
-  font-weight: 500;
+  color: var(--faint);
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 .ps-meta {
@@ -472,7 +636,7 @@ button.ps-open,
   color: var(--muted);
 }
 .ps-meta .spinner {
-  color: var(--warn);
+  color: var(--text);
 }
 .ps-sharpen {
   color: var(--faint);
@@ -480,6 +644,7 @@ button.ps-open,
 }
 .ps-failed {
   color: var(--danger);
+  font-weight: 700;
 }
 .ps-rename.model-name-input {
   width: 100%;
@@ -492,7 +657,7 @@ button.ps-open,
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
-  padding: 0 4px;
+  padding: 0 6px 0 4px;
 }
 /* the ⋯ shows on hover, on the open page, and always on touch */
 .ps-more {
@@ -515,13 +680,13 @@ button.ps-open,
   color: var(--danger);
 }
 
-/* collapsed: a rail of page numbers */
+/* collapsed: a rail of page numbers; the open page is a gold chip */
 .ps-expand {
   flex: none;
   width: 36px;
   height: 36px;
   padding: 0;
-  border-radius: 8px;
+  border-radius: 0;
 }
 .ps-rail {
   list-style: none;
@@ -536,7 +701,7 @@ button.ps-open,
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--border);
 }
 .ps-rail li:first-child {
   margin-top: 6px;
@@ -546,36 +711,38 @@ button.ps-rail-btn {
   width: 36px;
   height: 36px;
   padding: 0;
-  border-radius: 8px;
+  border-radius: 0;
   border-color: transparent;
   background: transparent;
   box-shadow: none;
   color: var(--text-2);
-  font-size: 12.5px;
+  font-size: 13px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-button.ps-rail-btn.active {
-  background: var(--surface-3);
-  color: var(--text);
-  font-weight: 600;
-  box-shadow: inset 2px 0 0 var(--accent);
+button.ps-rail-btn.active,
+button.ps-rail-btn.active:hover:not(:disabled) {
+  background: var(--kw-gold);
+  border-color: var(--kw-gold);
+  color: #000;
 }
 @media (hover: hover) {
   button.ps-rail-btn:not(.active):hover:not(:disabled) {
     background: var(--surface-2);
     border-color: transparent;
+    color: var(--text);
   }
 }
 .ps-rail-flag {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: 3px;
+  right: 3px;
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: 0;
 }
 .ps-rail-flag.busy {
-  background: var(--warn);
+  background: var(--accent-dim);
 }
 .ps-rail-flag.failed {
   background: var(--danger);
@@ -585,30 +752,27 @@ button.ps-rail-btn.active {
 
 .nl-scope.evtabs {
   display: flex;
-  margin: 2px 2px 10px;
 }
 .nl-scope .evtab {
   flex: 1 1 0;
   justify-content: center;
+  height: 40px;
+  font-size: 13px;
 }
-.nl-scope .evtab[aria-pressed="true"] {
-  background: var(--surface-3);
-  color: var(--text);
-  box-shadow: inset 0 -2px 0 var(--accent);
-}
-.nl-group + .nl-group {
-  margin-top: 14px;
-}
+/* a page's circles: its name as a small heading, then a list on a 2px rule */
 .nl-group-h {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin: 0 8px 4px;
-  font-size: 11px;
-  font-weight: 600;
+  margin: 0;
+  padding: 18px 12px 8px 14px;
+  font-family: var(--font-head);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--muted);
+  letter-spacing: var(--track-caps);
+  color: var(--text);
 }
 .nl-group-name {
   flex: 1 1 auto;
@@ -619,7 +783,8 @@ button.ps-rail-btn.active {
 }
 .nl-group-count {
   flex: none;
-  font-weight: 500;
+  font-family: var(--font);
+  font-weight: 400;
   text-transform: none;
   letter-spacing: 0;
   color: var(--faint);
@@ -630,19 +795,22 @@ button.ps-rail-btn.active {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  border-top: 2px solid var(--rule-strong);
+}
+.nl-rows > li {
+  border-bottom: 1px solid var(--border);
 }
 button.nl-row {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
+  gap: 9px;
   height: auto;
-  min-height: 34px;
-  padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: 7px;
+  min-height: 40px;
+  padding: 7px 12px 7px 14px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   box-shadow: none;
   color: var(--text);
@@ -651,30 +819,33 @@ button.nl-row {
   text-align: left;
 }
 button.nl-row.active {
-  background: var(--surface-3);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 6px 0 0 var(--kw-gold);
 }
 @media (hover: hover) {
   button.nl-row:hover:not(:disabled) {
     background: var(--surface-2);
-    border-color: var(--border);
+    border-color: transparent;
+    color: var(--text);
   }
   button.nl-row.active:hover:not(:disabled) {
-    background: var(--surface-3);
+    background: var(--accent-soft);
   }
 }
+/* circles stay round: the colour as it's drawn on the paper */
 .nl-dot {
   flex: none;
   width: 12px;
   height: 12px;
   border-radius: 50%;
   border: 2px solid;
+  box-shadow: 0 0 0 1px #fff;
 }
 .nl-num {
   flex: none;
-  min-width: 26px;
-  color: var(--text-2);
-  font-weight: 600;
+  min-width: 28px;
+  color: var(--text);
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 .nl-text {
@@ -683,21 +854,30 @@ button.nl-row.active {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text-2);
 }
 .nl-text.none {
-  color: var(--muted);
+  color: var(--faint);
 }
+/* the comment count: a small square tag */
 .nl-count {
   flex: none;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--muted);
-  font-size: var(--fs-xs);
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+.nl-count svg {
+  color: var(--muted);
+}
 .nl-empty {
-  padding: 20px 12px;
+  padding: 24px 16px;
   text-align: center;
   color: var(--muted);
   font-size: var(--fs-sm);
@@ -709,10 +889,11 @@ button.nl-row.active {
 .nl-empty .nl-empty-h {
   margin-bottom: 6px;
   color: var(--text);
-  font-weight: 600;
+  font-weight: 700;
 }
 
-/* ── placeholders and whole-screen states ───────────────────────────── */
+/* ── placeholders and whole-screen states ─────────────────────────────
+   Flat white sheets on the canvas, each starting with a 2px strong rule. */
 
 .ed-card {
   width: min(440px, calc(100% - 32px));
@@ -723,18 +904,21 @@ button.nl-row.active {
   padding: 28px 24px 24px;
   text-align: center;
   background: var(--surface);
-  background-image: var(--card-grad);
   border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  box-shadow: var(--hairline), var(--shadow-2);
+  border-top: 2px solid var(--rule-strong);
+  border-radius: 0;
+  box-shadow: none;
 }
 .ed-card.wide {
   width: min(520px, calc(100% - 32px));
 }
 .ed-card h2 {
-  margin: 8px 0 0;
-  font-size: var(--fs-lg);
-  font-weight: 600;
+  margin: 10px 0 0;
+  font-family: var(--font-head);
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.1;
+  color: var(--text);
 }
 .ed-card p {
   margin: 0;
@@ -744,20 +928,23 @@ button.nl-row.active {
   line-height: var(--lh-body);
 }
 .ed-card > .spinner {
-  color: var(--accent);
+  width: 22px;
+  height: 22px;
+  color: var(--text);
 }
 .ed-card .ed-card-note {
   color: var(--faint);
   font-size: var(--fs-xs);
 }
+/* the risk badge: red, a white mark */
 .ed-card-icon {
   width: 42px;
   height: 42px;
   display: grid;
   place-items: center;
-  border-radius: 12px;
-  background: var(--danger-soft);
-  color: var(--danger);
+  border-radius: 0;
+  background: #c21f1f;
+  color: #fff;
 }
 .ed-card-actions {
   display: flex;
@@ -768,8 +955,8 @@ button.nl-row.active {
 }
 .ed-card-actions > button,
 .ed-card-actions > a.btn {
-  height: 34px;
-  padding: 0 14px;
+  height: 36px;
+  padding: 0 16px;
 }
 .ed-card-drop.dropzone {
   width: 100%;
@@ -787,21 +974,20 @@ button.nl-row.active {
   place-items: center;
   padding: 24px 16px calc(24px + env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
-  background-color: var(--canvas-bg);
-  background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
-  background-size: 22px 22px;
+  background: var(--canvas-bg);
 }
 .ed-loading {
   display: inline-flex;
   align-items: center;
   gap: 10px;
   padding: 10px 16px;
-  border-radius: var(--r-pill);
+  border-radius: 0;
   background: var(--surface);
   border: 1px solid var(--border);
-  color: var(--text-2);
+  border-top: 2px solid var(--rule-strong);
+  color: var(--text);
   font-size: var(--fs-sm);
-  box-shadow: var(--shadow-2);
+  font-weight: 600;
 }
 
 /* ── the comments panel (floats over the stage's right edge) ─────────── */
@@ -817,7 +1003,7 @@ button.nl-row.active {
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border-left: 1px solid var(--border-subtle);
+  border-left: 1px solid var(--border);
   box-shadow: var(--shadow-3);
   padding-right: env(safe-area-inset-right, 0px);
   transform: translateX(calc(100% + 24px));
@@ -829,15 +1015,15 @@ button.nl-row.active {
   visibility: visible;
   transition: transform var(--t-base) var(--ease);
 }
-/* phone widths: a bottom sheet */
+/* phone widths: a bottom sheet, on a 2px strong rule */
 .ed-right.sheet {
   top: auto;
   left: 0;
   width: auto;
   height: 60%;
   border-left: 0;
-  border-top: 1px solid var(--border-strong);
-  border-radius: 14px 14px 0 0;
+  border-top: 2px solid var(--rule-strong);
+  border-radius: 0;
   padding-right: 0;
   transform: translateY(calc(100% + 24px));
 }
@@ -856,31 +1042,38 @@ button.nl-row.active {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 8px 10px 16px;
-  border-bottom: 1px solid var(--border-subtle);
+  min-height: 56px;
+  padding: 8px 8px 8px 16px;
+  border-bottom: 1px solid var(--border);
 }
+/* the circle's colour: round, as it's drawn on the paper */
 .cp-dot {
   flex: none;
   width: 16px;
   height: 16px;
   border-radius: 50%;
   border: 2.5px solid;
+  box-shadow: 0 0 0 1px #fff;
 }
 .cp-name {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: var(--track-tight);
+  font-family: var(--font-head);
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
   font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 button.cp-close {
   flex: none;
   width: 32px;
   height: 32px;
   padding: 0;
-  border-radius: 8px;
+  border-radius: 0;
 }
 .cp-scroll {
   flex: 1 1 auto;
@@ -899,19 +1092,19 @@ input.cp-title {
   height: 34px;
   padding: 0 8px;
   font-size: var(--fs-md);
-  font-weight: 600;
+  font-weight: 700;
   background: transparent;
   border-color: transparent;
   box-shadow: none;
 }
 @media (hover: hover) {
   input.cp-title:hover {
-    border-color: var(--border);
+    border-color: var(--border-strong);
   }
 }
 input.cp-title:focus {
   background: var(--input-bg);
-  border-color: var(--accent);
+  border-color: var(--text);
   box-shadow: var(--ring);
 }
 
@@ -921,14 +1114,14 @@ input.cp-title:focus {
   flex-wrap: wrap;
   gap: 8px 14px;
   margin-top: 10px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--border-subtle);
 }
 .cp-swatches {
   display: flex;
   gap: 2px;
   flex: none;
 }
+/* square buttons around round swatches (they stand for circles); the
+   colour in use gets a 2px ink frame */
 button.cp-swatch {
   width: 32px;
   height: 32px;
@@ -936,7 +1129,7 @@ button.cp-swatch {
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 50%;
+  border-radius: 0;
   background: transparent;
   box-shadow: none;
 }
@@ -945,19 +1138,17 @@ button.cp-swatch {
   height: 20px;
   border-radius: 50%;
   border: 2.5px solid;
+  box-shadow: 0 0 0 1.5px #fff;
   transition: transform var(--t-fast) var(--ease);
 }
 button.cp-swatch.on {
-  background: var(--surface-3);
-  box-shadow: inset 0 0 0 1.5px var(--text-2);
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--text);
 }
 @media (hover: hover) {
   button.cp-swatch:hover:not(:disabled) {
     background: var(--surface-2);
     border-color: transparent;
-  }
-  button.cp-swatch.on:hover:not(:disabled) {
-    background: var(--surface-3);
   }
   button.cp-swatch:hover span {
     transform: scale(1.1);
@@ -968,11 +1159,15 @@ button.cp-swatch.on {
   min-width: 110px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-size: var(--fs-xs);
-  color: var(--muted);
+  font-weight: 700;
+  color: var(--text);
 }
+/* size: a square gold thumb on a hairline, gold up to the thumb (--pct, set by SizeSlider) */
 .cp-size input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
   flex: 1 1 auto;
   min-width: 0;
   height: 28px;
@@ -980,31 +1175,69 @@ button.cp-swatch.on {
   padding: 0;
   border: 0;
   background: transparent;
-  accent-color: var(--accent);
   box-shadow: none;
+  cursor: pointer;
+}
+.cp-size input[type="range"]::-webkit-slider-runnable-track {
+  height: 16px;
+  border: 0;
+  background:
+    linear-gradient(var(--kw-gold), var(--kw-gold)) left center / var(--pct, 50%) 4px no-repeat,
+    linear-gradient(var(--border-strong), var(--border-strong)) left center / 100% 1px no-repeat;
+}
+.cp-size input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #000;
+  border-radius: 0;
+  background: var(--kw-gold);
+}
+.cp-size input[type="range"]::-moz-range-track {
+  height: 1px;
+  border: 0;
+  background: var(--border-strong);
+}
+.cp-size input[type="range"]::-moz-range-progress {
+  height: 4px;
+  background: var(--kw-gold);
+}
+.cp-size input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #000;
+  border-radius: 0;
+  background: var(--kw-gold);
 }
 
+/* comments: a heading, then a ruled list on a 2px strong rule */
 .cp-comments {
-  margin-top: 14px;
+  margin-top: 20px;
 }
 .cp-h {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 0 0 8px;
-  font-size: 11px;
-  font-weight: 600;
+  font-family: var(--font-head);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--muted);
+  letter-spacing: var(--track-caps);
+  color: var(--text);
 }
 .cp-h .count {
-  padding: 0 7px;
+  padding: 0 6px;
+  font-family: var(--font);
   letter-spacing: 0;
   text-transform: none;
 }
 .cp-empty {
   margin: 0;
+  padding-top: 10px;
+  border-top: 2px solid var(--rule-strong);
   color: var(--muted);
   font-size: var(--fs-sm);
 }
@@ -1014,21 +1247,24 @@ button.cp-swatch.on {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  border-top: 2px solid var(--rule-strong);
 }
 .cp-comment {
-  padding: 10px 12px 6px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  padding: 10px 0 6px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
 }
+/* the comment being edited: the soft gold highlight with its 6px bar */
 .cp-comment.editing {
-  padding: 8px;
-  border-color: rgba(247, 168, 27, 0.35);
+  padding: 10px 10px 10px 16px;
+  background: var(--accent-soft);
+  box-shadow: inset 6px 0 0 var(--kw-gold);
 }
 .cp-body {
-  color: var(--text);
-  font-size: 13.5px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
   line-height: var(--lh-body);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1040,7 +1276,7 @@ button.cp-swatch.on {
   min-height: 24px;
   margin-top: 4px;
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--faint);
 }
 .cp-actions {
   margin-left: auto;
@@ -1066,6 +1302,7 @@ button.cp-act {
   box-shadow: none;
   color: var(--text-2);
   font-size: var(--fs-xs);
+  font-weight: 700;
 }
 button.cp-act.danger {
   color: var(--danger);
@@ -1073,9 +1310,9 @@ button.cp-act.danger {
 }
 @media (hover: hover) {
   button.cp-act:hover:not(:disabled) {
-    background: var(--surface-3);
+    background: var(--kw-gold);
     border-color: transparent;
-    color: var(--text);
+    color: #000;
   }
   button.cp-act.danger:hover:not(:disabled) {
     background: var(--danger-soft);
@@ -1086,7 +1323,7 @@ textarea.cp-edit,
 textarea.cp-input {
   display: block;
   width: 100%;
-  font-size: 13.5px;
+  font-size: var(--fs-sm);
 }
 .cp-edit-foot,
 .cp-composer-foot {
@@ -1106,14 +1343,18 @@ textarea.cp-input {
 .cp-composer {
   flex: none;
   padding: 12px 16px;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--border);
   background: var(--surface);
 }
 .cp-foot {
   flex: none;
   display: flex;
-  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid var(--border-subtle);
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border);
+}
+/* Delete circle: the quiet button in the risk colour */
+button.cp-delete {
+  border-color: currentColor;
 }
 .cp-delete svg {
   flex: none;
@@ -1132,7 +1373,7 @@ textarea.cp-input {
   .ed-pn-short {
     display: inline;
   }
-  button.ed-page-name {
+  .ed-header button.ed-page-name {
     max-width: 240px;
   }
 }
@@ -1151,8 +1392,7 @@ textarea.cp-input {
   .ed-title {
     flex: 1 1 0;
     min-width: 0;
-    border-right: 0;
-    padding-right: 0;
+    margin-right: 0;
   }
   .ed-spacer {
     display: none;
@@ -1173,7 +1413,7 @@ textarea.cp-input {
   .ed-history {
     order: 7;
   }
-  button.ed-page-name {
+  .ed-header button.ed-page-name {
     max-width: none;
   }
 }
@@ -1182,8 +1422,14 @@ textarea.cp-input {
 @media (max-width: 599px) {
   .ed-header {
     gap: 4px;
-    padding-left: max(8px, env(safe-area-inset-left, 0px));
+    padding-left: max(10px, env(safe-area-inset-left, 0px));
     padding-right: max(8px, env(safe-area-inset-right, 0px));
+  }
+  .ed-logo .logo-bulb .logo-img {
+    height: 26px;
+  }
+  .ed-title::before {
+    margin: 0 8px 0 0;
   }
   .ed-pager,
   .ed-pages {
@@ -1192,7 +1438,7 @@ textarea.cp-input {
   .ed-page-label {
     display: none;
   }
-  button.ed-page-name {
+  .ed-header button.ed-page-name {
     padding: 0 4px;
   }
 }
@@ -1221,7 +1467,7 @@ textarea.cp-input {
     height: var(--hit);
   }
   .ed-back,
-  button.ed-page-name {
+  .ed-header button.ed-page-name {
     height: var(--hit);
   }
   /* "← Plans" shrinks to its arrow below 900 px: keep it a full square */
@@ -1229,7 +1475,7 @@ textarea.cp-input {
     min-width: var(--hit);
     justify-content: center;
   }
-  /* the save pill stays a slim pill; an invisible margin makes it a full finger target */
+  /* the save tag stays slim; an invisible margin makes it a full finger target */
   .ed-header .save-status {
     position: relative;
   }
@@ -1254,6 +1500,9 @@ textarea.cp-input {
   .ps-more {
     width: var(--hit);
   }
+  .nl-scope .evtab {
+    height: var(--hit);
+  }
   button.nl-row {
     min-height: var(--hit);
   }
@@ -1271,6 +1520,17 @@ textarea.cp-input {
   }
   .cp-size input[type="range"] {
     height: var(--hit);
+  }
+  .cp-size input[type="range"]::-webkit-slider-runnable-track {
+    height: 24px;
+  }
+  .cp-size input[type="range"]::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+  }
+  .cp-size input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
   }
   /* Edit / Delete on a comment: full finger height, and apart so a tap meant for one can't land on the other */
   button.cp-act {

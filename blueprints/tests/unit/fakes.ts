@@ -3,7 +3,7 @@
 // network that can go offline / sign out / hold requests / lose replies, an
 // in-memory localStorage and a page-lifecycle environment the tests drive.
 
-import { CIRCLE_COLORS, DEFAULT_CIRCLE_COLOR, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MAX_LABEL_CHARS, MAX_PLAN_NAME_CHARS, MAX_TITLE_CHARS, MIN_CIRCLE_R } from "../../src/shared/constants";
+import { circleColorOf, DEFAULT_CIRCLE_COLOR, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MAX_LABEL_CHARS, MAX_PLAN_NAME_CHARS, MAX_TITLE_CHARS, MIN_CIRCLE_R } from "../../src/shared/constants";
 import { sameValue } from "../../src/shared/merge";
 import {
   EDITABLE,
@@ -117,7 +117,7 @@ export class FakeServer {
       case "r":
         return finite(v) ? clamp(v, MIN_CIRCLE_R, MAX_CIRCLE_R) : undefined;
       case "color":
-        return typeof v === "string" && v in CIRCLE_COLORS ? v : undefined;
+        return circleColorOf(v); // as the server: an old name ("amber") counts as its new colour
       case "sortOrder":
         return finite(v) ? v : undefined;
       case "title":
@@ -167,7 +167,7 @@ export class FakeServer {
             x: clamp(d.x, 0, 1),
             y: clamp(d.y, 0, 1),
             r: clamp(d.r, MIN_CIRCLE_R, MAX_CIRCLE_R),
-            color: typeof d.color === "string" && d.color in CIRCLE_COLORS ? (d.color as CircleRow["color"]) : DEFAULT_CIRCLE_COLOR,
+            color: circleColorOf(d.color) ?? DEFAULT_CIRCLE_COLOR,
             title: typeof d.title === "string" ? strip(d.title).slice(0, MAX_TITLE_CHARS) : "",
             num,
             createdAt: finite(d.createdAt) ? d.createdAt : now,

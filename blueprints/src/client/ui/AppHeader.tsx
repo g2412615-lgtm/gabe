@@ -1,12 +1,14 @@
-// The top bar on the home page: the brand on the left, the account menu on
-// the right. Sticky and translucent like DeployMap's; it pads itself for the
-// iPad status bar when the app runs from the home screen.
+// The gold header band (docs/BRAND.md): the black Kilowatt Events lockup,
+// a 2px black divider and the product name on the left, actions and the
+// account menu on the right. Sticky; it stays gold with black content in the
+// dark theme too, and pads itself for the iPad status bar when the app runs
+// from the home screen.
 
 import type { ReactNode } from "react";
 import { api, ApiError } from "../api";
 import { Link, navigate } from "../router";
-import { APP_NAME } from "../../shared/constants";
-import BrandMark from "./BrandMark";
+import { APP_NAME, PRODUCT_NAME } from "../../shared/constants";
+import Logo from "./Logo";
 import Menu from "./Menu";
 import { IconLogout, IconUser } from "./icons";
 import { notify } from "./notify";
@@ -28,9 +30,9 @@ export default function AppHeader({ wide = true, children }: { wide?: boolean; c
   return (
     <header className={`app-header${wide ? " wide" : ""}`}>
       <div className="app-header-in">
-        <Link className="brand" to="/">
-          <BrandMark />
-          <span className="brand-name">{APP_NAME}</span>
+        <Link className="brand" to="/" title="Event plans">
+          <Logo variant="lockup" tone="on-gold" height={34} className="brand-logo" />
+          <span className="brand-name">{PRODUCT_NAME}</span>
         </Link>
         <div className="header-right">
           {children}

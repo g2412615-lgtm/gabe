@@ -24,7 +24,7 @@ function runDirectly(): boolean {
 async function main() {
   const config = loadConfig();
   const running = await startServer(config);
-  config.log.info(`Blueprint Notes listening on port ${running.port} (data in ${config.dataDir})`);
+  config.log.info(`KWE Blueprints listening on port ${running.port} (data in ${config.dataDir})`);
 
   let stopping = false;
   const stop = (signal: string) => {
@@ -47,7 +47,7 @@ async function main() {
 
 if (runDirectly()) {
   main().catch((e) => {
-    console.error("Blueprint Notes failed to start:", e);
+    console.error("KWE Blueprints failed to start:", e);
     process.exit(1);
   });
 }

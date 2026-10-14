@@ -1,4 +1,4 @@
-// The right-hand panel for one circle (DeployMap's side-panel look): its
+// The right-hand panel for one circle (laid out like DeployMap's side panel): its
 // name, colour and size, its comments, and a composer that saves as you
 // type. The editor mounts one per circle (key = circle id), so a draft can
 // never land on a different circle than the one it was typed for.
@@ -8,7 +8,7 @@
 // are not dependable moments to save (app switches, the page being killed).
 
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import { CIRCLE_COLORS, CIRCLE_COLOR_ORDER, MAX_COMMENT_CHARS, MAX_TITLE_CHARS } from "../../shared/constants";
+import { CIRCLE_COLORS, CIRCLE_COLOR_ORDER, DEFAULT_CIRCLE_COLOR, MAX_COMMENT_CHARS, MAX_TITLE_CHARS } from "../../shared/constants";
 import type { CircleRow, CommentRow } from "../../shared/types";
 import { IconTrash, IconX } from "../ui/icons";
 import { useCoarsePointer } from "../ui/media";
@@ -18,6 +18,7 @@ import { deleteCircleWithUndo, deleteCommentWithUndo } from "./actions";
 import { draftIsLive, editComment, finishDraft, leaveDraft, settleCommentEdit, typeDraft } from "./commentDrafts";
 import { circleName, commentTime, isMac, radiusToSlider, SIZE_STEPS, sliderToRadius, wasEdited } from "./format";
 import { holdsTyping } from "./panelLogic";
+import { paperSwatch } from "./swatch";
 
 const NO_COMMENTS: CommentRow[] = [];
 
@@ -49,7 +50,7 @@ function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onT
   // the comment being written in the composer: it exists already, but shows in the list only once it's finished
   const [draftId, setDraftId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const pal = CIRCLE_COLORS[circle.color];
+  const pal = CIRCLE_COLORS[circle.color] ?? CIRCLE_COLORS[DEFAULT_CIRCLE_COLOR];
   const shown = draftId ? comments.filter((c) => c.id !== draftId) : comments;
 
   const scrollToEnd = useCallback(() => {
@@ -62,7 +63,7 @@ function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onT
   return (
     <div className="cp" style={{ ["--cp-stroke" as string]: pal.stroke }}>
       <div className="cp-head">
-        <span className="cp-dot" style={{ background: pal.fill, borderColor: pal.stroke }} aria-hidden="true" />
+        <span className="cp-dot" style={paperSwatch(pal)} aria-hidden="true" />
         <h2 className="cp-name">{circleName(circle)}</h2>
         <button type="button" className="ghost icon-btn cp-close" onClick={onClose} aria-label="Close the panel" title="Close (Esc)">
           <IconX size={16} />
@@ -88,7 +89,7 @@ function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onT
                   // never part of a size drag that may still be open: its own step, saved now
                   onClick={() => store.updateCircle(circle.id, { color: c }, { live: false })}
                 >
-                  <span style={{ background: p.fill, borderColor: p.stroke }} />
+                  <span style={paperSwatch(p)} />
                 </button>
               );
             })}
@@ -227,6 +228,7 @@ function TitleField({ store, circle, onTypingChange }: { store: PlanStore; circl
  */
 function SizeSlider({ store, circle }: { store: PlanStore; circle: CircleRow }) {
   const ref = useRef<HTMLInputElement>(null);
+  const value = radiusToSlider(circle.r);
   const active = useRef(false);
 
   const end = useCallback(() => {
@@ -265,7 +267,9 @@ function SizeSlider({ store, circle }: { store: PlanStore; circle: CircleRow }) 
         min={0}
         max={SIZE_STEPS}
         step={1}
-        value={radiusToSlider(circle.r)}
+        value={value}
+        // how far the gold runs along the track (editor.css)
+        style={{ ["--pct" as string]: `${(value / SIZE_STEPS) * 100}%` }}
         aria-label="Circle size"
         onPointerUp={end}
         onPointerCancel={end}
@@ -485,7 +489,7 @@ function Composer({
       />
       <div className="cp-composer-foot">
         <span className="cp-note">{text.trim() ? "Saved as you type" : coarse ? "" : <><kbd>{isMac() ? "⌘" : "Ctrl"}</kbd> <kbd>↵</kbd> to add</>}</span>
-        {/* amber only once there's something to add (a disabled amber reads as muddy brown) */}
+        {/* the primary (black, gold words) only once there's something to add */}
         <button type="button" className={text.trim() ? "small primary" : "small"} onClick={finish} disabled={!text.trim()}>
           Add
         </button>

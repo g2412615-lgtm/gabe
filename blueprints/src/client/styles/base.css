@@ -1,11 +1,11 @@
-/* Base elements (DeployMap globals.css:116-175, 480-516), plus what an iPad
-   needs: no page bounce, no grey tap flash, no double-tap-zoom delay. */
+/* Base elements in the Kilowatt Events look (docs/BRAND.md): black ink on
+   white (white on near-black in the dark theme), Montserrat Black headings,
+   KW Gold for selection, focus rings and link underlines. Plus what an iPad
+   needs: no page bounce, no grey tap flash, no double-tap-zoom delay.
+   (color-scheme comes from tokens.css, per theme.) */
 
 * {
   box-sizing: border-box;
-}
-:root {
-  color-scheme: dark;
 }
 html {
   -webkit-text-size-adjust: 100%;
@@ -34,31 +34,46 @@ body {
   min-height: 100%;
 }
 
+/* headlines: Montserrat Black */
 h1,
 h2,
 h3 {
+  font-family: var(--font-head);
+  font-weight: 900;
   letter-spacing: var(--track-tight);
   line-height: var(--lh-tight);
+  color: var(--text);
 }
 .tabular {
   font-variant-numeric: tabular-nums;
 }
 ::selection {
-  background: rgba(247, 168, 27, 0.28);
+  background: var(--kw-gold);
+  color: #000;
 }
+/* the brand's focus ring: 3px KW Gold, 2px off the edge (inside the gold
+   header band it turns black — see .app-header) */
 :focus-visible {
-  outline: none;
-  box-shadow: var(--ring);
+  outline: 3px solid var(--accent-ring);
+  outline-offset: 2px;
 }
 a {
   color: var(--link);
   text-decoration: none;
-  transition: color var(--t-fast) var(--ease);
+  transition: color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
+}
+/* text links (no class of their own): a 2px gold underline, a gold fill
+   with black text on hover */
+a:not([class]) {
+  text-decoration: underline;
+  text-decoration-color: var(--kw-gold);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 @media (hover: hover) {
-  a:hover {
-    text-decoration: underline;
-    text-underline-offset: 2px;
+  a:not([class]):hover {
+    background: var(--kw-gold);
+    color: #000;
   }
 }
 img {
@@ -86,13 +101,14 @@ kbd {
   padding: 0 4px;
   border: 1px solid var(--border-strong);
   border-bottom-width: 2px;
-  border-radius: 4px;
-  background: var(--surface-2);
+  border-radius: 0;
+  background: var(--surface);
   font-family: var(--font);
   font-size: 11px;
+  font-weight: 700;
   line-height: 1.5;
   text-align: center;
-  color: var(--text-2);
+  color: var(--text);
 }
 
 /* small text utilities */
@@ -103,8 +119,9 @@ kbd {
   color: var(--text-2);
 }
 .caps {
+  font-family: var(--font-head);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 800;
   text-transform: uppercase;
   letter-spacing: var(--track-caps);
   color: var(--muted);

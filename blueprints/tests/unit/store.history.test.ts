@@ -91,14 +91,14 @@ describe("undo / redo", () => {
     await tick(DEBOUNCE_MS);
     d.store.updateCircle(id, { x: 0.8 });
     await tick(DEBOUNCE_MS);
-    d.server.edit("circle", id, { color: "purple", title: "VIP lot" }); // the iPad
+    d.server.edit("circle", id, { color: "black", title: "VIP lot" }); // the iPad
     await d.store.pull();
-    expect(live(d).circleById.get(id)).toMatchObject({ x: 0.8, color: "purple", num: 1 });
+    expect(live(d).circleById.get(id)).toMatchObject({ x: 0.8, color: "black", num: 1 });
 
     d.store.undo(); // undo the move only
-    expect(live(d).circleById.get(id)).toMatchObject({ x: 0.2, color: "purple", title: "VIP lot", num: 1 });
+    expect(live(d).circleById.get(id)).toMatchObject({ x: 0.2, color: "black", title: "VIP lot", num: 1 });
     await tick(DEBOUNCE_MS);
-    expect(d.server.circles.get(id)).toMatchObject({ x: 0.2, color: "purple", title: "VIP lot" });
+    expect(d.server.circles.get(id)).toMatchObject({ x: 0.2, color: "black", title: "VIP lot" });
   });
 
   it("undo while a request is out, then the reply lands: the undone value is kept and saved next", async () => {

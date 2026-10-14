@@ -38,7 +38,7 @@ describe("saving", () => {
     const d = await open();
     const id = d.store.addCircle({ pageId: d.pageId, x: 0.25, y: 0.5, r: 0.04 });
     let s = d.store.getState();
-    expect(s.circleById.get(id)).toMatchObject({ num: 0, color: "amber", title: "", x: 0.25 });
+    expect(s.circleById.get(id)).toMatchObject({ num: 0, color: "gold", title: "", x: 0.25 });
     expect(s.save).toEqual({ state: "pending", pending: 1, message: null });
     expect(d.storage.json(outboxKey(d.server.planId)).entries[`circle:${id}`].base).toBeNull();
 
@@ -85,7 +85,7 @@ describe("saving", () => {
     const id = await savedCircle(d);
     const before = d.net.syncs.length;
     d.store.updateCircle(id, { color: "green" });
-    d.store.updateCircle(id, { color: "amber" });
+    d.store.updateCircle(id, { color: "gold" });
     expect(d.store.getState().save.state).toBe("saved");
     await tick(MAX_WAIT_MS);
     expect(d.net.syncs.length).toBe(before);
@@ -540,9 +540,9 @@ describe("misc", () => {
   it("cleans values like the server does (clamped geometry, unknown colour ignored)", async () => {
     const d = await open();
     const id = d.store.addCircle({ pageId: d.pageId, x: 1.4, y: -2, r: 5, color: "pink" as never });
-    expect(d.store.getState().circleById.get(id)).toMatchObject({ x: 1, y: 0, r: 0.5, color: "amber" });
+    expect(d.store.getState().circleById.get(id)).toMatchObject({ x: 1, y: 0, r: 0.5, color: "gold" });
     d.store.updateCircle(id, { color: "hotpink" as never, x: Number.NaN });
-    expect(d.store.getState().circleById.get(id)).toMatchObject({ x: 1, color: "amber" });
+    expect(d.store.getState().circleById.get(id)).toMatchObject({ x: 1, color: "gold" });
     expect(d.store.getState().canUndo).toBe(true);
   });
 });

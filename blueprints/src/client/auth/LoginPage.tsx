@@ -1,12 +1,14 @@
-// Sign in: one password (the app has a single owner). A centred card on the
-// page background, in DeployMap's sign-in style. After signing in, the
-// browser goes back to where it was headed (`next`).
+// Sign in: one password (the app has a single owner). Minimal and square in
+// the Kilowatt Events look: a thin gold bar along the top of a plain page,
+// the lockup (black on the light theme, white on the dark), the product name
+// in Montserrat Black, the field and a black "Sign in" with gold text. After
+// signing in, the browser goes back to where it was headed (`next`).
 
 import { useRef, useState, type FormEvent } from "react";
 import { api, ApiError } from "../api";
 import { navigate } from "../router";
-import { APP_NAME } from "../../shared/constants";
-import BrandMark from "../ui/BrandMark";
+import { PRODUCT_NAME } from "../../shared/constants";
+import Logo from "../ui/Logo";
 import Spinner from "../ui/Spinner";
 
 function loginError(err: unknown): string {
@@ -43,11 +45,8 @@ export default function LoginPage({ next }: { next: string }) {
   return (
     <main className="login-page">
       <form className="login-card" onSubmit={submit} noValidate>
-        <div className="brand">
-          <BrandMark />
-          <span className="brand-name">{APP_NAME}</span>
-        </div>
-        <h1>Sign in</h1>
+        <Logo variant="lockup" tone="page" height={44} className="login-logo" />
+        <h1>{PRODUCT_NAME}</h1>
         <p className="muted">Enter the app password to open your event plans.</p>
 
         {/* Password managers pair a password with a username; there's only one owner. */}

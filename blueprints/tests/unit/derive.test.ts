@@ -13,7 +13,7 @@ const circle = (id: string, pageId: string, num: number, over: Partial<CircleRow
   x: 0.5,
   y: 0.5,
   r: 0.05,
-  color: "amber",
+  color: "gold",
   title: "",
   num,
   createdAt: 100 + num,

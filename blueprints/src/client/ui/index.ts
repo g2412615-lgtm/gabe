@@ -2,7 +2,8 @@
 // (Each file can also be imported directly; the default exports are the components.)
 
 export * from "./icons";
-export { default as BrandMark } from "./BrandMark";
+export { default as Logo, LOCKUP_MIN_WIDTH } from "./Logo";
+export type { LogoProps, LogoVariant, LogoTone } from "./Logo";
 export { default as Toaster } from "./Toaster";
 export { notify, notifyError, dismissToast, setToastOffset } from "./notify";
 export type { ToastKind, ToastAction, NotifyOptions } from "./notify";

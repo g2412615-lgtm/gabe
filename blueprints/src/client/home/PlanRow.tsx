@@ -1,6 +1,6 @@
-// One event plan on the home list (DeployMap's .event-row): page 1's
+// One event plan on the home list (a row of the ruled .event-list): page 1's
 // thumbnail, the name (a link that covers the row, so a tap anywhere on it
-// opens the plan), a meta line, and Open + ⋯ (Rename, Delete…).
+// opens the plan), a meta line, and the quiet Open + ⋯ (Rename, Delete…).
 
 import { memo, useState } from "react";
 import { assetUrl } from "../api";
@@ -64,7 +64,7 @@ function PlanRow({ plan, now, leaving = false, onRename, onDelete }: PlanRowProp
           label={<IconMore size={16} />}
           ariaLabel={`More for “${plan.name}”`}
           title="Rename or delete"
-          buttonClassName="small icon-btn"
+          buttonClassName="small icon-btn ghost"
           align="right"
           items={[
             { label: "Rename", icon: <IconEdit size={14} />, onSelect: () => setRenaming(true) },

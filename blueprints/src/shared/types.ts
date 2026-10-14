@@ -10,7 +10,8 @@ export type ID = string;
 /** Milliseconds since the epoch. */
 export type Millis = number;
 
-export type CircleColor = "amber" | "red" | "blue" | "green" | "purple";
+/** Kilowatt Events palette. Before the rebrand "gold" was "amber" and "black" was "purple" (see LEGACY_CIRCLE_COLORS). */
+export type CircleColor = "gold" | "black" | "red" | "blue" | "green";
 
 /**
  * queued    – waiting for the renderer

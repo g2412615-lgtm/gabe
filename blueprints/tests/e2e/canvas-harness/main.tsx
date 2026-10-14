@@ -61,12 +61,12 @@ function circle(id: string, num: number, x: number, y: number, r: number, color:
 const INITIAL: CircleRow[] = q.get("empty")
   ? []
   : [
-      circle("c1", 1, 0.5, 0.5, 0.05, "amber"), // the field
+      circle("c1", 1, 0.5, 0.5, 0.05, "gold"), // the field
       circle("c2", 2, 0.811, 0.196, 0.025, "red"), // Gate A
       circle("c3", 3, 0.05, 0.95, 0.004, "blue"), // tiny, on the small print
       circle("c4", 4, 0.27, 0.35, 0.09, "green"), // big…
-      circle("c5", 5, 0.29, 0.37, 0.015, "purple"), // …with a small one inside
-      circle("c6", 0, 0.7, 0.75, 0.03, "amber"), // not saved yet: "•"
+      circle("c5", 5, 0.29, 0.37, 0.015, "black"), // …with a small one inside
+      circle("c6", 0, 0.7, 0.75, 0.03, "gold"), // not saved yet: "•"
     ];
 
 const api = { events: [] as HarnessEvent[] } as HarnessApi;
@@ -123,7 +123,7 @@ function Harness({ page }: { page: PageRow }) {
           onAdd={(c) => {
             log({ t: "add", ...c });
             const id = `n${++seq.current}`;
-            setCircles((cs) => [...cs, circle(id, 0, c.x, c.y, c.r, "amber")]);
+            setCircles((cs) => [...cs, circle(id, 0, c.x, c.y, c.r, "gold")]);
             setSelected(id);
             setMode("move");
           }}

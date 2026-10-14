@@ -1,5 +1,6 @@
-// DeployMap's big .dropzone: a <label> around a hidden file input, so a tap
-// (iPad) or click opens the file picker and files can be dropped on it.
+// The big .dropzone (square, with a dashed rule; gold while a file is over
+// it): a <label> around a hidden file input, so a tap (iPad) or click opens
+// the file picker and files can be dropped on it.
 // The input stays focusable (1px, transparent), so it's a keyboard stop too:
 // Tab to it and press Space.
 
@@ -19,7 +20,7 @@ export interface DropzoneProps {
   hint?: ReactNode;
   icon?: ReactNode;
   disabled?: boolean;
-  /** A file is chosen: solid amber edge. */
+  /** A file is chosen: a solid ink edge. */
   hasFile?: boolean;
   /** One-line version (icon left, text right) for tight spaces. */
   compact?: boolean;

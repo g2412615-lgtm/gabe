@@ -80,7 +80,7 @@ export function serveClient(clientDir: string) {
     // A missing hashed bundle must not come back as HTML (the browser would try to run it).
     if (urlPath.startsWith("/assets/")) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
     if (!fs.existsSync(indexFile)) {
-      return new Response("Blueprint Notes hasn't been built yet. Run npm run build.", {
+      return new Response("KWE Blueprints hasn't been built yet. Run npm run build.", {
         status: 503,
         headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
       });

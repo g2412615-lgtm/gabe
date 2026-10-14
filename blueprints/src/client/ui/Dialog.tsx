@@ -1,4 +1,4 @@
-// Accessible modal dialog in DeployMap's look (.drawer-overlay > .drawer.es-dialog),
+// Accessible modal dialog on DeployMap's markup (.drawer-overlay > .drawer.es-dialog),
 // with the behaviour of its newer ImpactDialog plus what that lacked:
 // role="dialog" + aria-modal + aria-labelledby, Escape and a click outside
 // close it, focus goes to the first field (or the primary button) and comes

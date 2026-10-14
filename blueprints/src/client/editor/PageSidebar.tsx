@@ -1,4 +1,4 @@
-// The left sidebar: Pages | Notes tabs (DeployMap's .evtabs look).
+// The left sidebar: Pages | Notes tabs (DeployMap's .evtabs, with the KWE gold underline).
 //
 //  - Pages: a thumbnail per page with its label, circle count and render
 //    status; a ⋯ menu to rename, reorder and delete; "Add pages" uploads

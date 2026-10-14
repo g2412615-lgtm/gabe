@@ -125,13 +125,13 @@ describe("plan store ⇄ real server", () => {
     await a.store.flushNow();
     const b = await openStore(planId);
     a.store.updateCircle(c, { x: 0.6, y: 0.7 });
-    b.store.updateCircle(c, { color: "purple" });
+    b.store.updateCircle(c, { color: "black" });
     await a.store.flushNow();
     await b.store.flushNow();
     await a.store.pull();
     await b.store.pull();
     for (const d of [a, b]) {
-      expect(d.store.getState().circleById.get(c)).toMatchObject({ x: 0.6, y: 0.7, color: "purple", num: 1 });
+      expect(d.store.getState().circleById.get(c)).toMatchObject({ x: 0.6, y: 0.7, color: "black", num: 1 });
       expect(d.store.hasUnsaved()).toBe(false);
     }
     await closeAll(a.store, b.store);

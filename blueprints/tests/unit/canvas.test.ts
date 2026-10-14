@@ -29,7 +29,7 @@ const PAGE = { width: 8000, height: 5000 };
 const SIZE = { w: 1000, h: 700 };
 
 function circle(id: string, x: number, y: number, r: number): CircleRow {
-  return { id, planId: "p", pageId: "pg", x, y, r, color: "amber", title: "", num: 1, createdAt: 0, updatedAt: 0, deletedAt: null, rev: 1 };
+  return { id, planId: "p", pageId: "pg", x, y, r, color: "gold", title: "", num: 1, createdAt: 0, updatedAt: 0, deletedAt: null, rev: 1 };
 }
 
 class FakeClock implements Clock {

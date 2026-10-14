@@ -1,4 +1,4 @@
-# Puts Blueprint Notes online at https://blueprints.gabeweb.com (Fly.io app
+# Puts KWE Blueprints online at https://blueprints.gabeweb.com (Fly.io app
 # gabeweb-blueprints). Runs by itself whenever a change to blueprints/ lands
 # on the main branch, and by hand from the Actions tab ("Run workflow").
 #
@@ -7,7 +7,7 @@
 #   BLUEPRINTS_PASSWORD  the password for signing in to the app
 # Until FLY_API_TOKEN exists this workflow does nothing (and doesn't fail).
 # See blueprints/DEPLOY.md for the step-by-step.
-name: Blueprint Notes — deploy
+name: KWE Blueprints — deploy
 
 on:
   workflow_dispatch:

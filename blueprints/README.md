@@ -1,4 +1,4 @@
-# Blueprint Notes
+# KWE Blueprints
 
 Mark up event blueprints on a computer or an iPad. Upload a blueprint PDF.
 Each page becomes a sheet you can flip to and label. Drop circles on the
@@ -6,9 +6,11 @@ spots that matter, size them, and keep comments on each one. A circle lights
 up when you point at it, and its comments open in the sidebar on the right.
 Every change saves by itself, even on patchy stadium Wi‑Fi.
 
-It uses the same design language as DeployMap. It runs at
-**https://blueprints.gabeweb.com**; see [DEPLOY.md](DEPLOY.md) to put it
-online or update it.
+It's a Kilowatt Events tool and uses the Kilowatt Events brand: gold header
+band, black and white, square corners, Montserrat headlines (see
+[docs/BRAND.md](docs/BRAND.md)). The layout and interactions started from
+DeployMap's. It runs at **https://blueprints.gabeweb.com**; see
+[DEPLOY.md](DEPLOY.md) to put it online or update it.
 
 ## Run it locally
 
@@ -50,5 +52,6 @@ GitHub runs all of these on every change to this folder
 - `src/client/editor/`: the editor screen.
   - Page sidebar, notes list, and the comments panel.
   - Keyboard shortcuts.
-- `src/client/home/`, `src/client/auth/`, `src/client/ui/`, `src/client/styles/`: the event plans list, sign-in, and the UI kit ported from DeployMap.
-- `docs/SPEC.md` has the full specification: data model, API, sync rules, and how each screen should behave.
+- `src/client/home/`, `src/client/auth/`, `src/client/ui/`, `src/client/styles/`: the event plans list, sign-in, and the UI kit (structure ported from DeployMap, styled with the Kilowatt Events tokens in `styles/tokens.css`).
+- `public/brand/`: the official Kilowatt Events logo files, used as supplied (`ui/Logo.tsx`).
+- `docs/SPEC.md` has the full specification: data model, API, sync rules, and how each screen should behave. `docs/BRAND.md` has the brand rules.
