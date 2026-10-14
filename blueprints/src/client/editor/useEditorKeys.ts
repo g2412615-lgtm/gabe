@@ -6,7 +6,9 @@
 // someone else already handled the key (preventDefault, e.g. Escape closing
 // a menu). A focused slider keeps only the keys it moves with; buttons and
 // checkboxes keep none. Plain-letter shortcuts never fire with ⌘/Ctrl/Alt
-// held, so ⌘C still copies.
+// held. ⌘/Ctrl+C and V copy and paste the selected circle — unless there's
+// text selected on the page, or nothing to copy or paste: then they're the
+// browser's.
 
 import { useEffect, useRef } from "react";
 import { isOverlayOpen } from "../ui/layers";
@@ -18,6 +20,10 @@ export interface EditorKeyHandlers {
   escape(): void;
   /** Delete the selected circle; false when nothing is selected. */
   deleteSelected(): boolean;
+  /** ⌘C: copy the selected circle; false when there's nothing to copy (the browser copies). */
+  copy(): boolean;
+  /** ⌘V: paste copied circles onto the open page; false when there's nothing to paste. */
+  paste(): boolean;
   undo(): void;
   redo(): void;
   save(): void;
@@ -53,6 +59,12 @@ export function keyBelongsToField(t: EventTarget | { tagName?: string; type?: st
   return !NOT_TEXT.has(type);
 }
 
+/** Text selected on the page (a comment, say): ⌘C copies that, not the circle. */
+function hasTextSelection(): boolean {
+  const sel = typeof window !== "undefined" ? window.getSelection() : null;
+  return !!sel && !sel.isCollapsed && sel.toString().trim() !== "";
+}
+
 export function useEditorKeys(handlers: EditorKeyHandlers) {
   const ref = useRef(handlers);
   ref.current = handlers;
@@ -80,6 +92,10 @@ export function useEditorKeys(handlers: EditorKeyHandlers) {
         } else if (k === "y") {
           e.preventDefault();
           h.redo();
+        } else if (k === "c" && !e.shiftKey) {
+          if (!hasTextSelection() && h.copy()) e.preventDefault();
+        } else if (k === "v" && !e.shiftKey) {
+          if (h.paste()) e.preventDefault();
         }
         return;
       }

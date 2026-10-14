@@ -11,7 +11,9 @@ export { createPlanStore, isPlanOpen } from "./store";
 export { flushStoredOutboxes, startBackgroundSave, type LeftoverResult } from "./background";
 export { usePlanState } from "./usePlanState";
 export type {
+  CircleCopy,
   CirclePatch,
+  PastedCircle,
   Notifier,
   PlanState,
   PlanStore,

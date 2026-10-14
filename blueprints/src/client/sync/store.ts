@@ -36,7 +36,7 @@
 //    everything and resumes once the session is back; nothing is dropped
 //    except a change the server explicitly refused (and the owner is told).
 
-import { DEFAULT_CIRCLE_COLOR, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MIN_CIRCLE_R } from "../../shared/constants";
+import { DEFAULT_CIRCLE_COLOR, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MAX_TITLE_CHARS, MIN_CIRCLE_R } from "../../shared/constants";
 import { editableOf, merge3, sameEditable, sameValue } from "../../shared/merge";
 import {
   CREATE_FIELDS,
@@ -57,9 +57,9 @@ import { createDeriver } from "./derive";
 import { apiTransport, browserEnv, browserStorage, globalTimers } from "./env";
 import { History, type RowChange, type Step } from "./history";
 import { entryJson, parseKey, parseStored, readStoredText, restoreRow, writeStored, type AnyRow } from "./outbox";
-import type { CirclePatch, PlanState, PlanStore, PlanStoreOptions, SaveInfo, SaveState } from "./types";
+import type { CirclePatch, PastedCircle, PlanState, PlanStore, PlanStoreOptions, SaveInfo, SaveState } from "./types";
 
-export type { CirclePatch, PlanState, PlanStore, PlanStoreOptions, SaveInfo, SaveState, StorageLike, SyncEnv, SyncTransport, Timers } from "./types";
+export type { CircleCopy, CirclePatch, PastedCircle, PlanState, PlanStore, PlanStoreOptions, SaveInfo, SaveState, StorageLike, SyncEnv, SyncTransport, Timers } from "./types";
 
 // ── tuning (SPEC §7.4) ──────────────────────────────────────────────────────
 
@@ -72,6 +72,12 @@ export const ME_POLL_MS = 10_000;
 export const PULL_EVERY_MS = 30_000;
 export const LOAD_RETRY_MS = 5_000;
 export const MAX_OPS_PER_REQUEST = 500;
+/**
+ * A request's body stays under this, well clear of the server's 2 MB limit
+ * (MAX_SYNC_BYTES, answered with 413): 500 long comments (a copy of many
+ * noted circles onto many pages) would be more than that.
+ */
+export const MAX_REQUEST_BYTES = 1_500_000;
 /**
  * A gesture with no live update for this long is ended for the caller. A
  * lost pointer event must not hold a circle's changes back from saving.
@@ -675,13 +681,26 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
       flushAgain = false;
       const ops = buildOps(false);
       if (!ops.length) return;
-      const chunk = ops.slice(0, MAX_OPS_PER_REQUEST);
+      const chunk = firstChunk(ops);
       emit(); // "Saving…"
       if (!(await send(chunk, false))) return;
-      // more than one request's worth, or a save was asked for while this one was out
+      // more than one request's worth (the rest goes next: a comment never before its circle, ops are in that order), or a save was asked for while this one was out
       if (ops.length > chunk.length || flushAgain) continue;
       return;
     }
+  }
+
+  /** The ops for one request: at most MAX_OPS_PER_REQUEST and MAX_REQUEST_BYTES — always at least one (a single op is far smaller). */
+  function firstChunk(ops: SyncOp[]): SyncOp[] {
+    let n = 0;
+    let bytes = 0;
+    while (n < ops.length && n < MAX_OPS_PER_REQUEST) {
+      const size = utf8Length(JSON.stringify(ops[n])) + 1;
+      if (n > 0 && bytes + size > MAX_REQUEST_BYTES) break;
+      bytes += size;
+      n++;
+    }
+    return ops.slice(0, n);
   }
 
   /** Safety net after a flush: anything sendable left with no timer to pick it up gets one. */
@@ -1127,6 +1146,54 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
         commit([{ kind: "circle", id, before: { deletedAt: t }, after: { deletedAt: null } }]);
       });
       return id;
+    },
+
+    pasteCircles(items) {
+      if (!loaded || !Array.isArray(items)) return [];
+      const ids: string[] = [];
+      batch(() => {
+        if (gesture) endGestureInner();
+        const t = now();
+        // a millisecond apart, so the copies (and each one's comments) keep their order until the server numbers them
+        let tick = 0;
+        const changes: RowChange[] = [];
+        for (const item of items as readonly PastedCircle[]) {
+          if (!item || typeof item !== "object") continue;
+          const page = doc.page.get(item.pageId);
+          if (!page || page.deletedAt !== null) continue;
+          const id = makeId();
+          const at = t + tick++;
+          const row: CircleRow = {
+            id,
+            planId,
+            pageId: page.id,
+            x: isFiniteNumber(item.x) ? clamp(item.x, 0, 1) : 0.5,
+            y: isFiniteNumber(item.y) ? clamp(item.y, 0, 1) : 0.5,
+            r: isFiniteNumber(item.r) ? clamp(item.r, MIN_CIRCLE_R, MAX_CIRCLE_R) : FALLBACK_R,
+            color: isColor(item.color) ? item.color : DEFAULT_CIRCLE_COLOR,
+            title: typeof item.title === "string" ? cleanText(item.title, MAX_TITLE_CHARS) : "",
+            num: 0,
+            createdAt: at,
+            updatedAt: at,
+            deletedAt: null,
+            rev: 0,
+          };
+          putRow("circle", id, row);
+          changes.push({ kind: "circle", id, before: { deletedAt: t }, after: { deletedAt: null } });
+          ids.push(id);
+          for (const body of Array.isArray(item.comments) ? item.comments : []) {
+            const text = typeof body === "string" ? cleanText(body, MAX_COMMENT_CHARS) : "";
+            if (!text.trim()) continue;
+            const cid = makeId();
+            const cat = t + tick++;
+            const comment: CommentRow = { id: cid, planId, circleId: id, body: text, createdAt: cat, updatedAt: cat, deletedAt: null, rev: 0 };
+            putRow("comment", cid, comment);
+            changes.push({ kind: "comment", id: cid, before: { deletedAt: t }, after: { deletedAt: null } });
+          }
+        }
+        commit(changes);
+      });
+      return ids;
     },
 
     updateCircle(id, patch: CirclePatch, opts = {}) {

@@ -43,6 +43,23 @@ export interface PlanState {
 
 export type CirclePatch = Partial<Pick<CircleRow, "x" | "y" | "r" | "color" | "title">>;
 
+/**
+ * A circle to make by copying (pasteCircles): where it sits on its new page
+ * (the same fractions as CircleRow), how it looks, and its comments' text.
+ */
+export interface CircleCopy {
+  x: number;
+  y: number;
+  r: number;
+  color: CircleColor;
+  title: string;
+  /** Comment bodies, oldest first ([] for none). */
+  comments: string[];
+}
+
+/** A copy and the page it goes on. */
+export type PastedCircle = CircleCopy & { pageId: string };
+
 export interface PlanStore {
   getState(): PlanState;
   subscribe(fn: () => void): () => void;
@@ -61,6 +78,13 @@ export interface PlanStore {
   endGesture(): void;
   /** Restore the pre-gesture state (e.g. a second finger landed). */
   cancelGesture(): void;
+  /**
+   * Make copies of circles, with their comments, each on its live page: ONE
+   * undo step for the lot. Returns the new circles' ids in `items` order
+   * (the server numbers them in that order), leaving out any whose page
+   * isn't live.
+   */
+  pasteCircles(items: readonly PastedCircle[]): string[];
   /** Soft delete; one undo step. */
   deleteCircle(id: string): void;
   restoreCircle(id: string): void;

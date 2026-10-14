@@ -7,7 +7,8 @@
 //
 // The plan store is the single source of truth for the plan's rows and
 // autosaves every change; this component holds only view state: which page
-// is open, which circle is selected or hovered, the tool, the sidebar.
+// is open, which circle is selected or hovered, the tool, the sidebar, the
+// Copy circles dialog.
 //
 // The comments panel follows the pointer on a desktop: it shows a hovered
 // circle (unless the owner is typing in the panel) and falls back to the
@@ -23,14 +24,17 @@ import { APP_NAME } from "../../shared/constants";
 import type { View } from "../../shared/geometry";
 import type { CircleRow, PageRow } from "../../shared/types";
 import { addLeaveGuard, goToLogin, replaceQuery } from "../router";
-import { setToastOffset } from "../ui/notify";
+import { dismissToast, notify, setToastOffset } from "../ui/notify";
 import { useMediaQuery } from "../ui/media";
 import { createPlanStore, usePlanState } from "../sync";
 import BlueprintCanvas, { type CanvasGestureEvent, type CanvasHandle, type CanvasMode } from "./canvas/BlueprintCanvas";
 import { deleteCircleWithUndo, registerEditorStore, retryPage } from "./actions";
 import CommentsPanel, { type TypingField } from "./CommentsPanel";
+import { circleClipFor, copyOf, placeCopies, setCircleClip } from "./copyCircles";
+import CopyCirclesDialog, { type CopyRequest } from "./CopyCirclesDialog";
 import EditorHeader from "./EditorHeader";
 import PageSidebar, { type SidebarTab } from "./PageSidebar";
+import { circleName, isMac } from "./format";
 import { panelBusy, underCover } from "./panelLogic";
 import { PREF_LEFT_COLLAPSED, readPref, writePref } from "./prefs";
 import { EditorLoading, EditorMessage, FailedCard, NoPagesCard, PreparingCard } from "./StageStates";
@@ -110,6 +114,8 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   const [tab, setTab] = useState<SidebarTab>("pages");
   const [collapsed, setCollapsed] = useState(() => readPref(PREF_LEFT_COLLAPSED) === "1");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  /** The Copy circles dialog, while it's open (a new key per opening: it starts afresh). */
+  const [copyReq, setCopyReq] = useState<(CopyRequest & { key: number }) | null>(null);
   const narrow = useMediaQuery("(max-width: 899px)");
   const sheet = useMediaQuery("(max-width: 699px)");
 
@@ -403,6 +409,19 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
     tentativePin.current = null;
   };
 
+  // ── copying circles to another page ──────────────────────────────────
+  const copySeq = useRef(0);
+  const copyPageCircles = useCallback((fromPageId: string) => setCopyReq({ fromPageId, circleIds: null, key: ++copySeq.current }), []);
+  const copyCircle = useCallback((c: CircleRow) => setCopyReq({ fromPageId: c.pageId, circleIds: [c.id], key: ++copySeq.current }), []);
+  const closeCopy = useCallback(() => setCopyReq(null), []);
+  // a toast's "Show" opens a page in this editor: once it's closed the button would do nothing, so the toast goes too
+  const editorToasts = useRef(new Set<number>());
+  const trackEditorToast = useCallback((id: number) => void editorToasts.current.add(id), []);
+  useEffect(() => {
+    const toasts = editorToasts.current;
+    return () => toasts.forEach((id) => dismissToast(id));
+  }, []);
+
   const closePanel = useCallback(() => {
     tentativePin.current = null;
     setSelectedId(null);
@@ -477,6 +496,42 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
       const c = id ? store.getState().circleById.get(id) : undefined;
       if (!c) return false;
       deleteCircleWithUndo(store, c);
+      return true;
+    },
+    copy: () => {
+      const id = stateRef.current.selectedId;
+      const st = store.getState();
+      const c = id ? st.circleById.get(id) : undefined;
+      if (!c) return false;
+      setCircleClip({ planId, pageId: c.pageId, items: [copyOf(c, st.commentsByCircle.get(c.id), true)] });
+      const paste = isMac() ? "⌘V" : "Ctrl+V";
+      notify(
+        st.pages.length > 1 ? `${circleName(c)} copied. Open another page and press ${paste} to paste it.` : `${circleName(c)} copied. Press ${paste} to paste it.`,
+        "ok",
+      );
+      return true;
+    },
+    paste: () => {
+      const clip = circleClipFor(planId);
+      const st = store.getState();
+      const target = pageIdRef.current ? st.pageById.get(pageIdRef.current) : undefined;
+      if (!clip || !target) return false;
+      if (target.status === "failed") {
+        notify("This page couldn't be prepared — press Try again, then paste.", "info");
+        return true;
+      }
+      if (!viewable(target)) {
+        notify("This page isn't ready yet — paste once it shows.", "info");
+        return true;
+      }
+      const ids = store.pasteCircles(placeCopies(clip.items, target, st.circlesByPage.get(target.id) ?? NO_CIRCLES));
+      if (!ids.length) return true;
+      // the copy is selected, in view, and ready to drag into place
+      tentativePin.current = null;
+      setSelectedId(ids[0]);
+      setHoverId(null);
+      setMode("move");
+      canvasRef.current?.revealCircle(ids[0]);
       return true;
     },
     undo: () => store.undo(),
@@ -594,6 +649,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
           onOpenPage={openPage}
           onOpenCircle={openCircle}
           onLit={setNotesLit}
+          onCopyCircles={copyPageCircles}
           uploads={uploads}
         />
         {narrow && <div className={`ed-scrim${drawerOpen ? " on" : ""}`} onClick={() => setDrawerOpen(false)} aria-hidden="true" />}
@@ -629,11 +685,24 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
                 onTypingChange={onTypingChange}
                 takeComposerFocus={takeComposerFocus}
                 editorAlive={editorAlive}
+                onCopy={pages.length > 1 ? copyCircle : undefined}
               />
             )}
           </aside>
         </main>
       </div>
+
+      {copyReq && (
+        <CopyCirclesDialog
+          key={copyReq.key}
+          store={store}
+          request={copyReq}
+          onClose={closeCopy}
+          currentPageId={pageId}
+          onShowPage={openPage}
+          onEditorToast={trackEditorToast}
+        />
+      )}
     </div>
   );
 }
