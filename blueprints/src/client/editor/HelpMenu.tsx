@@ -21,6 +21,7 @@ export default function HelpMenu() {
         <Row k={<kbd>Esc</kbd>}>Stop adding · close · deselect</Row>
         <Row k={<kbd>Delete</kbd>}>Delete the selected circle</Row>
         <Row k={<kbd>F</kbd>}>Zoom to the selected circle</Row>
+        <Row k={<><kbd>{mod}</kbd><kbd>C</kbd> <kbd>{mod}</kbd><kbd>V</kbd></>}>Copy the selected circle · paste it on the open page</Row>
         <Row k={<><kbd>{mod}</kbd><kbd>Z</kbd></>}>Undo</Row>
         <Row k={isMac() ? <><kbd>⌘</kbd><kbd>⇧</kbd><kbd>Z</kbd></> : <><kbd>Ctrl</kbd><kbd>Y</kbd></>}>Redo</Row>
         <Row k={<><kbd>{mod}</kbd><kbd>S</kbd></>}>Save now</Row>
@@ -41,6 +42,7 @@ export default function HelpMenu() {
         <Row k="Press and hold">Add a circle there</Row>
         <Row k="Drag a dot">Resize the selected circle</Row>
         <Row k="Drag the ✥ in its middle">Move the selected circle</Row>
+        <Row k="⋯ beside a page">Copy its circles to another page</Row>
       </dl>
     </section>
   );
@@ -56,6 +58,7 @@ export default function HelpMenu() {
         <Row k="Click a circle">Keep its comments open</Row>
         <Row k="Drag a dot">Resize the selected circle</Row>
         <Row k="Drag the ✥">Move the selected circle</Row>
+        <Row k="⋯ beside a page">Copy its circles to another page</Row>
       </dl>
     </section>
   );

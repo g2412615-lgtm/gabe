@@ -1,8 +1,9 @@
 // The left sidebar: Pages | Notes tabs (DeployMap's .evtabs, with the KWE gold underline).
 //
 //  - Pages: a thumbnail per page with its label, circle count and render
-//    status; a ⋯ menu to rename, reorder and delete; "Add pages" uploads
-//    more files into the plan, with a progress row per file.
+//    status; a ⋯ menu to rename, reorder, copy its circles to another page
+//    and delete; "Add pages" uploads more files into the plan, with a
+//    progress row per file.
 //  - Notes: NotesList.
 //
 // On a wide screen it sits beside the blueprint and collapses to a 56 px
@@ -19,7 +20,7 @@ import InlineRename from "../ui/InlineRename";
 import Menu from "../ui/Menu";
 import Progress from "../ui/Progress";
 import Spinner from "../ui/Spinner";
-import { IconChevron, IconEdit, IconLayers, IconList, IconMore, IconSidebar, IconTrash, IconUpload, IconX } from "../ui/icons";
+import { IconChevron, IconCopy, IconEdit, IconLayers, IconList, IconMore, IconSidebar, IconTrash, IconUpload, IconX } from "../ui/icons";
 import { usePlanState, type PlanStore } from "../sync";
 import { deletePageWithUndo, retryPage } from "./actions";
 import { plural } from "./format";
@@ -45,6 +46,8 @@ export interface PageSidebarProps {
   onOpenPage(id: string): void;
   onOpenCircle(c: CircleRow): void;
   onLit(id: string | null): void;
+  /** Open the Copy circles dialog for this page's circles. */
+  onCopyCircles(pageId: string): void;
   uploads: AddPages;
 }
 
@@ -146,6 +149,7 @@ function PageSidebar(p: PageSidebarProps) {
                   active={page.id === p.currentPageId}
                   circles={circlesByPage.get(page.id) ?? NONE}
                   onOpen={p.onOpenPage}
+                  onCopy={p.onCopyCircles}
                 />
               ))}
             </ol>
@@ -188,9 +192,10 @@ interface PageItemProps {
   active: boolean;
   circles: CircleRow[];
   onOpen(id: string): void;
+  onCopy(id: string): void;
 }
 
-const PageItem = memo(function PageItem({ store, page, index, count, active, circles, onOpen }: PageItemProps) {
+const PageItem = memo(function PageItem({ store, page, index, count, active, circles, onOpen, onCopy }: PageItemProps) {
   const [renaming, setRenaming] = useState(false);
 
   const askDelete = async () => {
@@ -253,7 +258,7 @@ const PageItem = memo(function PageItem({ store, page, index, count, active, cir
         <Menu
           label={<IconMore size={16} />}
           ariaLabel={`More for “${page.label}”`}
-          title="Rename, move or delete"
+          title="Rename, move, copy circles or delete"
           buttonClassName="ghost small icon-btn ps-more"
           align="right"
           items={[
@@ -269,6 +274,12 @@ const PageItem = memo(function PageItem({ store, page, index, count, active, cir
               icon: <IconChevron size={14} className="rot-down" />,
               disabled: index >= count - 1,
               onSelect: () => store.movePage(page.id, index + 1),
+            },
+            count > 1 && {
+              label: "Copy circles to another page…",
+              icon: <IconCopy size={14} />,
+              disabled: circles.length === 0,
+              onSelect: () => onCopy(page.id),
             },
             "separator",
             { label: "Delete page…", icon: <IconTrash size={14} />, danger: true, onSelect: () => void askDelete() },
@@ -306,7 +317,7 @@ function PageStatusLine({ page, circles }: { page: PageRow; circles: number }) {
 }
 
 /** The page on white; a placeholder until an image exists. */
-function PageThumb({ page }: { page: PageRow }) {
+export function PageThumb({ page }: { page: PageRow }) {
   // The thumbnail is written just after the preview: while the page is at
   // "preview", the preview image is the one that certainly exists.
   const src = page.assetKey ? (page.status === "ready" ? assetUrl.thumb(page) : page.status === "preview" ? assetUrl.preview(page) : null) : null;

@@ -10,7 +10,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { CIRCLE_COLORS, CIRCLE_COLOR_ORDER, DEFAULT_CIRCLE_COLOR, MAX_COMMENT_CHARS, MAX_TITLE_CHARS } from "../../shared/constants";
 import type { CircleRow, CommentRow } from "../../shared/types";
-import { IconTrash, IconX } from "../ui/icons";
+import { IconCopy, IconTrash, IconX } from "../ui/icons";
 import { useCoarsePointer } from "../ui/media";
 import { usePlanState, type PlanStore } from "../sync";
 import AutoTextarea from "./AutoTextarea";
@@ -43,9 +43,11 @@ export interface CommentsPanelProps {
   takeComposerFocus(circleId: string): boolean;
   /** False while the whole editor is unmounting (the store is going away: no more edits). */
   editorAlive(): boolean;
+  /** Open the Copy circles dialog for this circle; absent when there's no other page to copy to. */
+  onCopy?(circle: CircleRow): void;
 }
 
-function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onTypingChange, takeComposerFocus, editorAlive }: CommentsPanelProps) {
+function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onTypingChange, takeComposerFocus, editorAlive, onCopy }: CommentsPanelProps) {
   const comments = usePlanState(store, (s) => s.commentsByCircle.get(circle.id) ?? NO_COMMENTS);
   // the comment being written in the composer: it exists already, but shows in the list only once it's finished
   const [draftId, setDraftId] = useState<string | null>(null);
@@ -135,6 +137,11 @@ function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onT
       />
 
       <div className="cp-foot">
+        {onCopy && (
+          <button type="button" className="ghost small cp-copy" onClick={() => onCopy(circle)} title="Copy this circle onto another page">
+            <IconCopy size={14} /> Copy to another page
+          </button>
+        )}
         <button type="button" className="ghost danger small cp-delete" onClick={() => deleteCircleWithUndo(store, circle)}>
           <IconTrash size={14} /> Delete circle
         </button>

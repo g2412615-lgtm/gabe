@@ -1346,15 +1346,131 @@ textarea.cp-input {
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
+/* Copy to another page on the left, Delete circle on the right */
 .cp-foot {
   flex: none;
   display: flex;
+  justify-content: flex-end;
+  gap: 8px;
   padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border);
+}
+button.cp-copy {
+  margin-right: auto;
+}
+.cp-copy svg {
+  flex: none;
 }
 /* Delete circle: the quiet button in the risk colour */
 button.cp-delete {
   border-color: currentColor;
+}
+
+/* ── Copy circles dialog (CopyCirclesDialog.tsx) ─────────────────────── */
+.cc {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* focused on open only to put focus inside the dialog: no ring */
+.cc:focus {
+  outline: none;
+}
+.cc-sec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  margin-bottom: 6px;
+}
+.cc-sec-h h4 {
+  margin: 0;
+  font-family: var(--font-head);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+  color: var(--text);
+}
+/* the lists scroll on their own, so both stay in reach on a short screen */
+.cc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(30vh, 260px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 2px solid var(--rule-strong);
+  border-bottom: 1px solid var(--border);
+}
+.cc-list > li + li {
+  border-top: 1px solid var(--border);
+}
+.cc-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 6px 10px;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.cc-row input {
+  flex: none;
+  margin: 0;
+}
+.cc-row:has(input:checked) {
+  background: var(--accent-soft);
+  box-shadow: inset 6px 0 0 var(--kw-gold);
+}
+@media (hover: hover) {
+  .cc-row:hover {
+    background: var(--surface-2);
+  }
+  .cc-row:has(input:checked):hover {
+    background: var(--accent-soft);
+  }
+}
+.cc-page .ps-thumb {
+  width: 64px;
+  height: 46px;
+}
+.cc-page-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cc-page-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.cc-none {
+  margin: 0;
+  padding: 12px 0;
+  border-top: 2px solid var(--rule-strong);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.cc-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+}
+.cc-check input {
+  flex: none;
+  margin: 0;
 }
 .cp-delete svg {
   flex: none;
@@ -1504,6 +1620,10 @@ button.cp-delete {
     height: var(--hit);
   }
   button.nl-row {
+    min-height: var(--hit);
+  }
+  .cc-row,
+  .cc-check {
     min-height: var(--hit);
   }
   button.cp-swatch {

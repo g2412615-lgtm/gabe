@@ -49,6 +49,8 @@ async function freshPlan(page: Page, info: TestInfo, what: string) {
 /** Circle mode, then a click / tap on the sheet: returns the new circle (saved, numbered). */
 async function addCircleAt(page: Page, info: TestInfo, planId: string, at: Pt) {
   const ed = editor(page);
+  const before = await ed.circles.count();
+  const known = new Set(liveCircles(await getPlan(page, planId)).map((c) => c.id));
   await press(ed.circleMode, info);
   await expect(ed.circleMode).toHaveAttribute("aria-pressed", "true");
   await expect(ed.canvas).toHaveClass(/\bis-add\b/);
@@ -56,13 +58,13 @@ async function addCircleAt(page: Page, info: TestInfo, planId: string, at: Pt) {
   // the panel opens on the new circle and the tool goes back to Move
   await expect(ed.panel).toBeVisible();
   await expect(ed.moveMode).toHaveAttribute("aria-pressed", "true");
-  await expect(ed.circles).toHaveCount(1);
+  await expect(ed.circles).toHaveCount(before + 1);
   // numbered by the server on its first save
   await expect(ed.panelTitle).toHaveText(/^Circle #\d+$/);
   await expectSaved(page);
-  const circles = liveCircles(await getPlan(page, planId));
-  expect(circles).toHaveLength(1);
-  return circles[0];
+  const added = liveCircles(await getPlan(page, planId)).filter((c) => !known.has(c.id));
+  expect(added).toHaveLength(1);
+  return added[0];
 }
 
 /** Type a comment in the composer and add it (⌘↵-free: the Add button, like the iPad). */
@@ -305,6 +307,113 @@ test.describe("the editor", () => {
     await page.reload();
     await waitCanvas(page);
     await expect(ed.circles).toHaveCount(1);
+  });
+
+  test("copy circles to other pages: all of a page's from its menu, one from its panel, ⌘C / ⌘V", async ({ page }, info) => {
+    const { planId, pages } = await freshPlan(page, info, "Copy circles");
+    const ed = editor(page);
+    const [p1, p2, p3, p4] = pages;
+    const onPage = async (pageId: string) => liveCircles(await getPlan(page, planId)).filter((c) => c.pageId === pageId);
+
+    // ── two circles on A-101, the first with a comment ──
+    // (the panel's × closes it: adding a circle may pan the view, so no spot on the sheet is surely bare)
+    const closePanel = ed.panel.getByRole("button", { name: "Close the panel" });
+    const gate = await addCircleAt(page, info, planId, await sheetPoint(page, 0.3, 0.38));
+    await writeComment(page, info, "Mag line at Gate B");
+    await press(closePanel, info);
+    await expect(ed.panel).toBeHidden();
+    const tent = await addCircleAt(page, info, planId, await sheetPoint(page, 0.62, 0.5));
+    await press(closePanel, info);
+    await expect(ed.panel).toBeHidden();
+
+    // ── the page's ⋯ menu: every circle on the page, to P-1 ──
+    if (!isTouch(info)) await ed.pageButton("A-101").hover();
+    await press(ed.pageMenu("A-101"), info);
+    await press(page.getByRole("menuitem", { name: "Copy circles to another page…" }), info);
+    const dialog = page.getByRole("dialog", { name: "Copy circles" });
+    await expect(dialog).toBeVisible();
+    const circleBoxes = dialog.getByRole("group", { name: "Circles" }).getByRole("checkbox");
+    await expect(circleBoxes).toHaveCount(2);
+    for (const box of await circleBoxes.all()) await expect(box).toBeChecked();
+    const targets = dialog.getByRole("group", { name: "Copy to" }).getByRole("checkbox");
+    await expect(targets).toHaveCount(3);
+    await expect(dialog.getByRole("button", { name: "Copy 2 circles" })).toBeDisabled(); // no page chosen yet
+    await press(dialog.getByRole("checkbox", { name: /P-1/ }), info);
+    await expect(dialog.getByRole("checkbox", { name: "Copy their 1 comment too" })).toBeChecked();
+    await press(dialog.getByRole("button", { name: "Copy 2 circles" }), info);
+    await expect(dialog).toBeHidden();
+    const done = ed.toast("Copied 2 circles to “P-1”.");
+    await expect(done).toBeVisible();
+    await expectSaved(page);
+
+    // same spots, size, comments; new numbers
+    let copies = await onPage(p2.id);
+    expect(copies).toHaveLength(2);
+    const twinOf = (c: { x: number; y: number }) => copies.find((k) => Math.abs(k.x - c.x) < 1e-9 && Math.abs(k.y - c.y) < 1e-9);
+    const gateCopy = twinOf(gate)!;
+    expect(gateCopy).toBeTruthy();
+    expect(gateCopy.r).toBeCloseTo(gate.r, 9);
+    expect(gateCopy.num).toBeGreaterThan(tent.num);
+    expect(twinOf(tent)).toBeTruthy();
+    expect(liveComments(await getPlan(page, planId), gateCopy.id).map((c) => c.body)).toEqual(["Mag line at Gate B"]);
+    expect(await onPage(p1.id)).toHaveLength(2); // the originals stay
+
+    // "Show" opens P-1 with the copies on it
+    await press(done.getByRole("button", { name: "Show" }), info);
+    await expect(ed.pager).toContainText("Page 2 of 4");
+    await waitCanvas(page);
+    await expect(ed.circles).toHaveCount(2);
+
+    // the whole copy is one undo step
+    await press(ed.headerUndo, info);
+    await expect(ed.circles).toHaveCount(0);
+    await expectSaved(page);
+    await expect.poll(async () => (await onPage(p2.id)).length).toBe(0);
+
+    // ── a circle's panel: just that circle, to C-201 ──
+    await press(ed.prevPage, info);
+    await expect(ed.pager).toContainText("Page 1 of 4");
+    await waitCanvas(page);
+    await pressAt(page, await circleScreenPoint(page, gate), info);
+    await expect(ed.panel).toBeVisible();
+    await press(ed.panel.getByRole("button", { name: "Copy to another page" }), info);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("checkbox", { name: /#\d+ Mag line at Gate B/ })).toBeChecked();
+    await expect(dialog.getByRole("group", { name: "Circles" }).getByRole("checkbox", { checked: true })).toHaveCount(1);
+    await press(dialog.getByRole("checkbox", { name: /C-201/ }), info);
+    await press(dialog.getByRole("checkbox", { name: "Copy its 1 comment too" }), info); // the circle alone, this time
+    await press(dialog.getByRole("button", { name: "Copy 1 circle" }), info);
+    await expect(ed.toast("Copied 1 circle to “C-201”.")).toBeVisible();
+    await expectSaved(page);
+    copies = await onPage(p3.id);
+    expect(copies).toHaveLength(1);
+    expect(copies[0]).toMatchObject({ x: gate.x, y: gate.y, color: gate.color });
+    expect(liveComments(await getPlan(page, planId), copies[0].id)).toHaveLength(0);
+
+    if (isTouch(info)) return;
+
+    // ── desktop: ⌘C on the selected circle, ⌘V on another page ──
+    await expect(ed.panel).toBeVisible(); // Circle #… is still selected
+    await page.keyboard.press("ControlOrMeta+C");
+    await expect(ed.toast(/copied\. Open another page and press (⌘|Ctrl\+)V to paste it\./)).toBeVisible();
+    await ed.pageButton("R-1").click();
+    await expect(ed.pager).toContainText("Page 4 of 4");
+    await waitCanvas(page);
+    await page.keyboard.press("ControlOrMeta+V");
+    await expect(ed.circles).toHaveCount(1);
+    await expect(ed.panel).toBeVisible(); // the copy is selected, ready to move
+    await expect(ed.commentBodies).toHaveText(["Mag line at Gate B"]);
+    await expectSaved(page);
+    copies = await onPage(p4.id);
+    expect(copies).toHaveLength(1);
+    expect(copies[0]).toMatchObject({ x: gate.x, y: gate.y });
+    // pasted again on the same page: it steps aside instead of hiding under the first
+    await page.keyboard.press("ControlOrMeta+V");
+    await expect(ed.circles).toHaveCount(2);
+    await expectSaved(page);
+    copies = await onPage(p4.id);
+    expect(copies).toHaveLength(2);
+    expect(Math.max(...copies.map((c) => c.x))).toBeGreaterThan(gate.x);
   });
 
   test("add pages from a second PDF, delete one page; home shows the counts", async ({ page }, info) => {

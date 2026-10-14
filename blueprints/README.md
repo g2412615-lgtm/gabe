@@ -4,7 +4,9 @@ Mark up event blueprints on a computer or an iPad. Upload a blueprint PDF.
 Each page becomes a sheet you can flip to and label. Drop circles on the
 spots that matter, size them, and keep comments on each one. A circle lights
 up when you point at it, and its comments open in the sidebar on the right.
-Every change saves by itself, even on patchy stadium Wi‑Fi.
+Copy circles, with their comments, onto another page of the same event plan
+(a page's ⋯ menu, a circle's panel, or ⌘C / ⌘V). Every change saves by
+itself, even on patchy stadium Wi‑Fi.
 
 It's a Kilowatt Events tool and uses the Kilowatt Events brand: gold header
 band, black and white, square corners, Montserrat headlines (see
@@ -50,7 +52,7 @@ GitHub runs all of these on every change to this folder
   - Pan, pinch, wheel and trackpad zoom, and deep-zoom tiles.
   - Circles, plus the gestures to add, resize and move them.
 - `src/client/editor/`: the editor screen.
-  - Page sidebar, notes list, and the comments panel.
+  - Page sidebar, notes list, the comments panel, and copying circles between pages.
   - Keyboard shortcuts.
 - `src/client/home/`, `src/client/auth/`, `src/client/ui/`, `src/client/styles/`: the event plans list, sign-in, and the UI kit (structure ported from DeployMap, styled with the Kilowatt Events tokens in `styles/tokens.css`).
 - `public/brand/`: the official Kilowatt Events logo files, used as supplied (`ui/Logo.tsx`).
