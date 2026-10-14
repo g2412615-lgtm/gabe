@@ -226,6 +226,26 @@ describe("placeCopies", () => {
     }
   });
 
+  it("a group filling the page, pasted onto it again and again: once one side's room is used up it tries the other", () => {
+    const square = { id: "pg3", width: 1000, height: 1000 };
+    // (a) room on both sides: +0.02, +0.04, +0.05, then −0.02, −0.04, −0.05 — six clear pastes
+    const group = [copy({ x: 0.05, y: 0.05 }), copy({ x: 0.95, y: 0.95 }), copy({ x: 0.5, y: 0.3 })];
+    const existing = group.map((g, i) => circle({ id: `a${i}`, x: g.x, y: g.y }));
+    for (let n = 0; n < 6; n++) {
+      const placed = placeCopies(group, square, existing);
+      for (const p of placed) expect(existing.some((c) => Math.abs(c.x - p.x) < 1e-4 && Math.abs(c.y - p.y) < 1e-4)).toBe(false);
+      placed.forEach((p, i) => existing.push(circle({ id: `a${n}-${i}`, x: p.x, y: p.y })));
+    }
+    // (b) a sliver of room on each side: the second paste uses the other sliver
+    const edge = [copy({ x: 0.01, y: 0.01 }), copy({ x: 0.995, y: 0.995 })];
+    const there = edge.map((g, i) => circle({ id: `b${i}`, x: g.x, y: g.y }));
+    for (let n = 0; n < 2; n++) {
+      const placed = placeCopies(edge, square, there);
+      for (const p of placed) expect(there.some((c) => Math.abs(c.x - p.x) < 1e-4 && Math.abs(c.y - p.y) < 1e-4)).toBe(false);
+      placed.forEach((p, i) => there.push(circle({ id: `b${n}-${i}`, x: p.x, y: p.y })));
+    }
+  });
+
   it("a group by the edge keeps its layout: it moves only as far as the page has room", () => {
     const group = [copy({ x: 0.985, y: 0.975 }), copy({ x: 0.3, y: 0.4 }), copy({ x: 0.5, y: 0.2 })];
     const existing = group.map((g, i) => circle({ id: `g${i}`, x: g.x, y: g.y }));

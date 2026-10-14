@@ -10,9 +10,10 @@
 //
 // A copy never lands exactly on top of a circle that's already there (a
 // paste onto the page it came from, or the same copy pasted twice): the
-// whole group steps aside together until it's clear — down and to the
-// right, or up and to the left near those edges — and never further than
-// the page has room for, so the group keeps its layout.
+// whole group steps aside together until it's clear — toward the side of
+// the page with more room (down and right, or up and left near those
+// edges), then the other way once that room is used up — and never further
+// than the page has room for, so the group keeps its layout.
 
 import type { CircleRow, CommentRow, PageRow } from "../../shared/types";
 import type { CircleCopy, PastedCircle } from "../sync";
@@ -38,8 +39,29 @@ export function copyOf(circle: CircleRow, comments: readonly CommentRow[] | unde
 }
 
 /**
+ * The shifts to try along one axis for a group at `vs`, nearest first: in
+ * steps toward the side with more room, up to that edge, then the other way.
+ */
+function shiftsAlong(vs: readonly number[], step: number): number[] {
+  const lo = Math.min(...vs);
+  const hi = Math.max(...vs);
+  const sides: [number, number][] = 1 - hi >= lo ? [[1, 1 - hi], [-1, lo]] : [[-1, lo], [1, 1 - hi]];
+  const out = [0];
+  for (const [dir, room] of sides) {
+    if (!(room > 0)) continue;
+    for (let k = 1; k <= MAX_NUDGES; k++) {
+      out.push(dir * Math.min(k * step, room));
+      if (k * step >= room) break;
+    }
+  }
+  return out;
+}
+
+/**
  * The copies placed on `page`: where they were, or moved together (keeping
- * their layout) until none sits on a circle in `existing`.
+ * their layout) until none sits on a circle in `existing` — or, with no
+ * clear spot left (a group filling the page, pasted again and again), where
+ * the fewest do.
  */
 export function placeCopies(items: readonly CircleCopy[], page: Pick<PageRow, "id" | "width" | "height">, existing: readonly CircleRow[]): PastedCircle[] {
   if (!items.length) return [];
@@ -48,28 +70,24 @@ export function placeCopies(items: readonly CircleCopy[], page: Pick<PageRow, "i
   const dy = page.height > 0 && long > 0 ? (NUDGE * long) / page.height : NUDGE;
   const xs = items.map((it) => clamp01(it.x));
   const ys = items.map((it) => clamp01(it.y));
-  // per axis: toward the side with more room, and no further than that room
-  const axis = (vs: number[], step: number) => {
-    const lo = Math.min(...vs);
-    const hi = Math.max(...vs);
-    return (k: number) => (1 - hi >= lo ? Math.min(k * step, 1 - hi) : -Math.min(k * step, lo));
-  };
-  const shiftX = axis(xs, dx);
-  const shiftY = axis(ys, dy);
-  const covers = (x: number, y: number) => existing.some((c) => Math.abs(c.x - x) < SAME_SPOT && Math.abs(c.y - y) < SAME_SPOT);
-  const at = (k: number): PastedCircle[] => {
-    const sx = shiftX(k);
-    const sy = shiftY(k);
-    return items.map((it, i) => ({ ...it, pageId: page.id, x: clamp01(xs[i] + sx), y: clamp01(ys[i] + sy) }));
-  };
-  for (let k = 0; k <= MAX_NUDGES; k++) {
-    const placed = at(k);
-    if (!placed.some((p) => covers(p.x, p.y))) return placed;
-    // out of room on both axes: moving further changes nothing
-    if (k > 0 && shiftX(k) === shiftX(k - 1) && shiftY(k) === shiftY(k - 1)) break;
+  const sx = shiftsAlong(xs, dx);
+  const sy = shiftsAlong(ys, dy);
+  const covers = (p: PastedCircle) => existing.some((c) => Math.abs(c.x - p.x) < SAME_SPOT && Math.abs(c.y - p.y) < SAME_SPOT);
+  let best: PastedCircle[] = [];
+  let bestCovered = Infinity;
+  // both axes step together; one that has run out of shifts stays at its last
+  for (let k = 0; k < Math.max(sx.length, sy.length); k++) {
+    const ox = sx[Math.min(k, sx.length - 1)];
+    const oy = sy[Math.min(k, sy.length - 1)];
+    const placed = items.map((it, i) => ({ ...it, pageId: page.id, x: clamp01(xs[i] + ox), y: clamp01(ys[i] + oy) }));
+    const covered = placed.filter(covers).length;
+    if (covered === 0) return placed;
+    if (covered < bestCovered) {
+      best = placed;
+      bestCovered = covered;
+    }
   }
-  // nowhere clear (a group spanning the whole page): one step aside, as far as there's room
-  return at(1);
+  return best;
 }
 
 // ── the clipboard (⌘C / ⌘V) ─────────────────────────────────────────────

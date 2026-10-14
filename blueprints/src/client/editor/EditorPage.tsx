@@ -517,7 +517,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
       const target = pageIdRef.current ? st.pageById.get(pageIdRef.current) : undefined;
       if (!clip || !target) return false;
       if (target.status === "failed") {
-        notify("This page couldn't be prepared — press Retry, then paste.", "info");
+        notify("This page couldn't be prepared — press Try again, then paste.", "info");
         return true;
       }
       if (!viewable(target)) {
