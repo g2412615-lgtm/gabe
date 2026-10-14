@@ -416,6 +416,58 @@ test.describe("the editor", () => {
     expect(Math.max(...copies.map((c) => c.x))).toBeGreaterThan(gate.x);
   });
 
+  test("Copy circles carries on when its page is deleted on another device; its Show toast goes with the editor", async ({ page }, info) => {
+    const { planId, pages } = await freshPlan(page, info, "Copy · page gone");
+    const ed = editor(page);
+    const [p1, p2, p3] = pages;
+    const closePanel = ed.panel.getByRole("button", { name: "Close the panel" });
+
+    // a circle on A-101 and one on C-201 (left open)
+    await addCircleAt(page, info, planId, await sheetPoint(page, 0.3, 0.38));
+    await press(closePanel, info);
+    await press(ed.pageButton("C-201"), info);
+    await expect(ed.pager).toContainText("Page 3 of 4");
+    await waitCanvas(page);
+    const other = await addCircleAt(page, info, planId, await sheetPoint(page, 0.5, 0.5));
+    await press(closePanel, info);
+
+    if (!isTouch(info)) await ed.pageButton("A-101").hover();
+    await press(ed.pageMenu("A-101"), info);
+    await press(page.getByRole("menuitem", { name: "Copy circles to another page…" }), info);
+    const dialog = page.getByRole("dialog", { name: "Copy circles" });
+    const from = dialog.getByLabel("From");
+    await expect(from).toHaveValue(p1.id);
+
+    // the other device deletes A-101; this one hears of it when the tab comes back into view
+    const row = (await getPlan(page, planId)).pages.find((p) => p.id === p1.id)!;
+    const editable = { label: row.label, sortOrder: row.sortOrder, deletedAt: null };
+    const res = await page.request.post(`/api/plans/${planId}/sync`, {
+      data: { ops: [{ kind: "page", id: p1.id, base: editable, data: { ...editable, deletedAt: Date.now() } }] },
+    });
+    expect(res.ok()).toBe(true);
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+
+    // the dialog moves on to the page that has circles, and copies from there
+    await expect(from).toHaveValue(p3.id);
+    await expect(dialog.getByRole("group", { name: "Circles" }).getByRole("checkbox")).toHaveCount(1);
+    await expect(dialog.getByRole("group", { name: "Copy to" }).getByRole("checkbox")).toHaveCount(2); // P-1, R-1
+    await press(dialog.getByRole("checkbox", { name: /P-1/ }), info);
+    await press(dialog.getByRole("button", { name: "Copy 1 circle" }), info);
+    const done = ed.toast("Copied 1 circle to “P-1”.");
+    await expect(done.getByRole("button", { name: "Show" })).toBeVisible();
+
+    // leaving the editor takes the toast at once (its Show would have nowhere to go) —
+    // well before its own 8 s are up
+    await press(page.getByTitle("Back to event plans"), info);
+    await expect(page).toHaveURL((u) => u.pathname === "/");
+    await expect(done).toHaveCount(0, { timeout: 1_500 });
+
+    // and the copy is saved (leaving sends it)
+    await expect
+      .poll(async () => liveCircles(await getPlan(page, planId)).filter((c) => c.pageId === p2.id).map((c) => [c.x, c.y]))
+      .toEqual([[other.x, other.y]]);
+  });
+
   test("add pages from a second PDF, delete one page; home shows the counts", async ({ page }, info) => {
     const { planId } = await freshPlan(page, info, "Add + delete pages");
     const ed = editor(page);

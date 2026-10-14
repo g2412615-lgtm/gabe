@@ -24,7 +24,7 @@ import { APP_NAME } from "../../shared/constants";
 import type { View } from "../../shared/geometry";
 import type { CircleRow, PageRow } from "../../shared/types";
 import { addLeaveGuard, goToLogin, replaceQuery } from "../router";
-import { notify, setToastOffset } from "../ui/notify";
+import { dismissToast, notify, setToastOffset } from "../ui/notify";
 import { useMediaQuery } from "../ui/media";
 import { createPlanStore, usePlanState } from "../sync";
 import BlueprintCanvas, { type CanvasGestureEvent, type CanvasHandle, type CanvasMode } from "./canvas/BlueprintCanvas";
@@ -414,6 +414,13 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   const copyPageCircles = useCallback((fromPageId: string) => setCopyReq({ fromPageId, circleIds: null, key: ++copySeq.current }), []);
   const copyCircle = useCallback((c: CircleRow) => setCopyReq({ fromPageId: c.pageId, circleIds: [c.id], key: ++copySeq.current }), []);
   const closeCopy = useCallback(() => setCopyReq(null), []);
+  // a toast's "Show" opens a page in this editor: once it's closed the button would do nothing, so the toast goes too
+  const editorToasts = useRef(new Set<number>());
+  const trackEditorToast = useCallback((id: number) => void editorToasts.current.add(id), []);
+  useEffect(() => {
+    const toasts = editorToasts.current;
+    return () => toasts.forEach((id) => dismissToast(id));
+  }, []);
 
   const closePanel = useCallback(() => {
     tentativePin.current = null;
@@ -509,6 +516,10 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
       const st = store.getState();
       const target = pageIdRef.current ? st.pageById.get(pageIdRef.current) : undefined;
       if (!clip || !target) return false;
+      if (target.status === "failed") {
+        notify("This page couldn't be prepared — press Retry, then paste.", "info");
+        return true;
+      }
       if (!viewable(target)) {
         notify("This page isn't ready yet — paste once it shows.", "info");
         return true;
@@ -682,7 +693,15 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
       </div>
 
       {copyReq && (
-        <CopyCirclesDialog key={copyReq.key} store={store} request={copyReq} onClose={closeCopy} currentPageId={pageId} onShowPage={openPage} />
+        <CopyCirclesDialog
+          key={copyReq.key}
+          store={store}
+          request={copyReq}
+          onClose={closeCopy}
+          currentPageId={pageId}
+          onShowPage={openPage}
+          onEditorToast={trackEditorToast}
+        />
       )}
     </div>
   );

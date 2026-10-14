@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { circleClipFor, clearCircleClip, copyOf, NUDGE, placeCopies, setCircleClip } from "../../src/client/editor/copyCircles";
 import type { CircleRow, CommentRow } from "../../src/shared/types";
 import type { CircleCopy } from "../../src/client/sync";
-import { DEBOUNCE_MS } from "../../src/client/sync/store";
+import { utf8Length } from "../../src/client/sync/clean";
+import { DEBOUNCE_MS, MAX_REQUEST_BYTES } from "../../src/client/sync/store";
+import { MAX_SYNC_BYTES } from "../../src/server/sync";
 import { device, FakeServer, settle } from "./fakes";
 
 beforeEach(() => {
@@ -106,6 +108,29 @@ describe("pasteCircles", () => {
     expect(d.store.getState().circlesByPage.get(p1.id)).toEqual([]);
   });
 
+  it("a big copy of long comments saves in requests the server takes (each under its 2 MB limit), comments after their circles", async () => {
+    expect(MAX_REQUEST_BYTES).toBeLessThan(MAX_SYNC_BYTES);
+    const d = await open();
+    // 120 circles, each with a full-length note of 2-byte characters: ~2.4 MB in all, under 500 ops
+    const note = "é".repeat(10_000);
+    const items = Array.from({ length: 120 }, (_, i) => ({ ...copy({ x: (i % 12) / 12, y: Math.floor(i / 12) / 10, comments: [note] }), pageId: d.pages[1].id }));
+    const ids = d.store.pasteCircles(items);
+    await tick(DEBOUNCE_MS);
+    for (let i = 0; i < 10 && d.store.hasUnsaved(); i++) await tick(10);
+
+    const sizes = d.net.syncs.map((r) => utf8Length(JSON.stringify({ ops: r.ops })));
+    expect(sizes.length).toBeGreaterThan(1);
+    for (const size of sizes) expect(size).toBeLessThanOrEqual(MAX_REQUEST_BYTES);
+    expect(d.store.hasUnsaved()).toBe(false);
+    expect(d.store.getState().save.state).toBe("saved");
+    expect(ids.every((id) => d.server.circles.get(id)!.num > 0)).toBe(true);
+    expect([...d.server.comments.values()].filter((c) => c.body === note)).toHaveLength(120);
+    // a comment never goes out before its circle's create
+    const sentAt = new Map<string, number>();
+    d.net.syncs.forEach((r, i) => r.ops.forEach((op) => sentAt.set(op.id, i)));
+    for (const c of d.server.comments.values()) expect(sentAt.get(c.id)!).toBeGreaterThanOrEqual(sentAt.get(c.circleId)!);
+  });
+
   it("ends a drag still open, so the copy is a step of its own", async () => {
     const d = await open();
     const id = d.store.addCircle({ pageId: d.pages[0].id, x: 0.1, y: 0.1, r: 0.02 });
@@ -182,10 +207,36 @@ describe("placeCopies", () => {
     expect(again[0].x).toBeCloseTo(0.3 + 2 * dx, 9);
   });
 
-  it("stays on the page", () => {
+  it("in the bottom-right corner it steps up and left instead — still clear, still on the page", () => {
     const placed = placeCopies([copy({ x: 1, y: 1 })], page, [circle({ x: 1, y: 1 })]);
-    expect(placed[0].x).toBeLessThanOrEqual(1);
-    expect(placed[0].y).toBeLessThanOrEqual(1);
+    expect(placed[0].x).toBeCloseTo(1 - NUDGE, 9);
+    expect(placed[0].y).toBeCloseTo(1 - (NUDGE * 7200) / 4800, 9);
+  });
+
+  it("pasted again and again near an edge, every copy lands on a spot of its own", () => {
+    const existing = [circle({ x: 0.99, y: 0.985 })];
+    for (let i = 0; i < 4; i++) {
+      const [p] = placeCopies([copy({ x: 0.99, y: 0.985 })], page, existing);
+      expect(p.x).toBeGreaterThanOrEqual(0);
+      expect(p.x).toBeLessThanOrEqual(1);
+      expect(p.y).toBeGreaterThanOrEqual(0);
+      expect(p.y).toBeLessThanOrEqual(1);
+      expect(existing.some((c) => Math.abs(c.x - p.x) < 1e-4 && Math.abs(c.y - p.y) < 1e-4)).toBe(false);
+      existing.push(circle({ id: `c${i + 2}`, x: p.x, y: p.y }));
+    }
+  });
+
+  it("a group by the edge keeps its layout: it moves only as far as the page has room", () => {
+    const group = [copy({ x: 0.985, y: 0.975 }), copy({ x: 0.3, y: 0.4 }), copy({ x: 0.5, y: 0.2 })];
+    const existing = group.map((g, i) => circle({ id: `g${i}`, x: g.x, y: g.y }));
+    const placed = placeCopies(group, page, existing);
+    const sx = placed[0].x - group[0].x;
+    const sy = placed[0].y - group[0].y;
+    expect(Math.abs(sx) + Math.abs(sy)).toBeGreaterThan(0);
+    placed.forEach((p, i) => {
+      expect(p.x - group[i].x).toBeCloseTo(sx, 9);
+      expect(p.y - group[i].y).toBeCloseTo(sy, 9);
+    });
   });
 });
 

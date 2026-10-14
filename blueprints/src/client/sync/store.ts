@@ -73,6 +73,12 @@ export const PULL_EVERY_MS = 30_000;
 export const LOAD_RETRY_MS = 5_000;
 export const MAX_OPS_PER_REQUEST = 500;
 /**
+ * A request's body stays under this, well clear of the server's 2 MB limit
+ * (MAX_SYNC_BYTES, answered with 413): 500 long comments (a copy of many
+ * noted circles onto many pages) would be more than that.
+ */
+export const MAX_REQUEST_BYTES = 1_500_000;
+/**
  * A gesture with no live update for this long is ended for the caller. A
  * lost pointer event must not hold a circle's changes back from saving.
  */
@@ -675,13 +681,26 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
       flushAgain = false;
       const ops = buildOps(false);
       if (!ops.length) return;
-      const chunk = ops.slice(0, MAX_OPS_PER_REQUEST);
+      const chunk = firstChunk(ops);
       emit(); // "Saving…"
       if (!(await send(chunk, false))) return;
-      // more than one request's worth, or a save was asked for while this one was out
+      // more than one request's worth (the rest goes next: a comment never before its circle, ops are in that order), or a save was asked for while this one was out
       if (ops.length > chunk.length || flushAgain) continue;
       return;
     }
+  }
+
+  /** The ops for one request: at most MAX_OPS_PER_REQUEST and MAX_REQUEST_BYTES — always at least one (a single op is far smaller). */
+  function firstChunk(ops: SyncOp[]): SyncOp[] {
+    let n = 0;
+    let bytes = 0;
+    while (n < ops.length && n < MAX_OPS_PER_REQUEST) {
+      const size = utf8Length(JSON.stringify(ops[n])) + 1;
+      if (n > 0 && bytes + size > MAX_REQUEST_BYTES) break;
+      bytes += size;
+      n++;
+    }
+    return ops.slice(0, n);
   }
 
   /** Safety net after a flush: anything sendable left with no timer to pick it up gets one. */

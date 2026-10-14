@@ -6,7 +6,7 @@
 // circle's panel (just that circle). Copies land in the same spot on each
 // page they go to (copyCircles.ts).
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { CIRCLE_COLORS, DEFAULT_CIRCLE_COLOR } from "../../shared/constants";
 import type { CircleRow, CommentRow } from "../../shared/types";
 import Dialog from "../ui/Dialog";
@@ -32,6 +32,8 @@ export interface CopyCirclesDialogProps {
   currentPageId: string | null;
   /** The toast's "Show": open that page. */
   onShowPage(pageId: string): void;
+  /** A toast whose action needs this editor open (it's dismissed when the editor closes). */
+  onEditorToast(toastId: number): void;
 }
 
 const NONE: CircleRow[] = [];
@@ -39,7 +41,7 @@ const NONE: CircleRow[] = [];
 const commentCount = (comments: readonly CommentRow[] | undefined) => (comments ?? []).filter((c) => c.body.trim() !== "").length;
 
 /** Mount one per opening (a new key each time): it starts from the request. */
-export default function CopyCirclesDialog({ store, request, onClose, currentPageId, onShowPage }: CopyCirclesDialogProps) {
+export default function CopyCirclesDialog({ store, request, onClose, currentPageId, onShowPage, onEditorToast }: CopyCirclesDialogProps) {
   const pages = usePlanState(store, (s) => s.pages);
   const circlesByPage = usePlanState(store, (s) => s.circlesByPage);
   const commentsByCircle = usePlanState(store, (s) => s.commentsByCircle);
@@ -86,6 +88,16 @@ export default function CopyCirclesDialog({ store, request, onClose, currentPage
     });
   };
 
+  // The From page went away (deleted on the other device): carry on from another page, or close with none left.
+  useEffect(() => {
+    if (fromPage) return;
+    const next = sources[0] ?? pages[0];
+    if (next) changeFrom(next.id);
+    else onClose();
+    // only when the From page comes and goes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromPage]);
+
   const toggle = (set: ReadonlySet<string>, id: string) => {
     const next = new Set(set);
     if (!next.delete(id)) next.add(id);
@@ -109,7 +121,8 @@ export default function CopyCirclesDialog({ store, request, onClose, currentPage
       return;
     }
     const to = toPages[0];
-    notify(`Copied ${what} to “${to.label}”.`, "ok", to.id === currentPageId ? {} : { action: { label: "Show", run: () => onShowPage(to.id) } });
+    if (to.id === currentPageId) notify(`Copied ${what} to “${to.label}”.`, "ok");
+    else onEditorToast(notify(`Copied ${what} to “${to.label}”.`, "ok", { action: { label: "Show", run: () => onShowPage(to.id) } }));
   };
 
   return (

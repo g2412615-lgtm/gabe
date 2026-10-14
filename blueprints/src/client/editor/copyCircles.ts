@@ -10,12 +10,14 @@
 //
 // A copy never lands exactly on top of a circle that's already there (a
 // paste onto the page it came from, or the same copy pasted twice): the
-// whole group steps down and to the right until it's clear.
+// whole group steps aside together until it's clear — down and to the
+// right, or up and to the left near those edges — and never further than
+// the page has room for, so the group keeps its layout.
 
 import type { CircleRow, CommentRow, PageRow } from "../../shared/types";
 import type { CircleCopy, PastedCircle } from "../sync";
 
-/** One step when a copy would cover a circle: this share of the page's long side, down and right. */
+/** One step when a copy would cover a circle: this share of the page's long side, across and down. */
 export const NUDGE = 0.02;
 const MAX_NUDGES = 25;
 /** Two circles closer than this (share of the page) count as on the same spot. */
@@ -36,20 +38,38 @@ export function copyOf(circle: CircleRow, comments: readonly CommentRow[] | unde
 }
 
 /**
- * The copies placed on `page`: where they were, or stepped down and right
- * together (keeping their layout) until none sits on a circle in `existing`.
+ * The copies placed on `page`: where they were, or moved together (keeping
+ * their layout) until none sits on a circle in `existing`.
  */
 export function placeCopies(items: readonly CircleCopy[], page: Pick<PageRow, "id" | "width" | "height">, existing: readonly CircleRow[]): PastedCircle[] {
+  if (!items.length) return [];
   const long = Math.max(page.width, page.height);
   const dx = page.width > 0 && long > 0 ? (NUDGE * long) / page.width : NUDGE;
   const dy = page.height > 0 && long > 0 ? (NUDGE * long) / page.height : NUDGE;
+  const xs = items.map((it) => clamp01(it.x));
+  const ys = items.map((it) => clamp01(it.y));
+  // per axis: toward the side with more room, and no further than that room
+  const axis = (vs: number[], step: number) => {
+    const lo = Math.min(...vs);
+    const hi = Math.max(...vs);
+    return (k: number) => (1 - hi >= lo ? Math.min(k * step, 1 - hi) : -Math.min(k * step, lo));
+  };
+  const shiftX = axis(xs, dx);
+  const shiftY = axis(ys, dy);
   const covers = (x: number, y: number) => existing.some((c) => Math.abs(c.x - x) < SAME_SPOT && Math.abs(c.y - y) < SAME_SPOT);
-  let placed: PastedCircle[] = [];
+  const at = (k: number): PastedCircle[] => {
+    const sx = shiftX(k);
+    const sy = shiftY(k);
+    return items.map((it, i) => ({ ...it, pageId: page.id, x: clamp01(xs[i] + sx), y: clamp01(ys[i] + sy) }));
+  };
   for (let k = 0; k <= MAX_NUDGES; k++) {
-    placed = items.map((it) => ({ ...it, pageId: page.id, x: clamp01(it.x + k * dx), y: clamp01(it.y + k * dy) }));
-    if (!placed.some((p) => covers(p.x, p.y))) break;
+    const placed = at(k);
+    if (!placed.some((p) => covers(p.x, p.y))) return placed;
+    // out of room on both axes: moving further changes nothing
+    if (k > 0 && shiftX(k) === shiftX(k - 1) && shiftY(k) === shiftY(k - 1)) break;
   }
-  return placed;
+  // nowhere clear (a group spanning the whole page): one step aside, as far as there's room
+  return at(1);
 }
 
 // ── the clipboard (⌘C / ⌘V) ─────────────────────────────────────────────
