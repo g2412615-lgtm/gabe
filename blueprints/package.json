@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "vite build && node scripts/build-server.mjs",
@@ -15,6 +17,7 @@
     "hash-password": "node scripts/hash-password.mjs"
   },
   "dependencies": {
+    "@fontsource/montserrat": "5.3.0",
     "@hono/node-server": "1.19.17",
     "hono": "4.13.13",
     "mupdf": "1.28.1",

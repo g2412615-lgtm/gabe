@@ -1,6 +1,11 @@
 import type { CircleColor } from "./types";
 
-export const APP_NAME = "Blueprint Notes";
+/** What the app calls itself (tab titles, home-screen name). */
+export const APP_NAME = "KWE Blueprints";
+/** The company it belongs to, for the logo's alt text and the sign-in page. */
+export const ORG_NAME = "Kilowatt Events";
+/** The product name shown after the logo in the gold header band. */
+export const PRODUCT_NAME = "Blueprints";
 
 /** Upload limit per file. Plotted CAD sets can be large; the body is streamed to disk. */
 export const MAX_UPLOAD_MB = 150;
