@@ -1,4 +1,4 @@
-// The editor's save pill (DeployMap's .save-status), extended with the
+// The editor's save tag (DeployMap's .save-status), extended with the
 // states an always-autosaving, sometimes-offline app needs. It's a button:
 // tapping it saves right away (or retries after an error).
 //
@@ -28,7 +28,7 @@ export function saveStatusLabel(state: SaveStatusState, pending = 0): { long: st
     case "saving":
       return { long: "Saving…", short: "Saving…", cls: "saving" };
     case "offline":
-      // amber, not red: nothing is lost, it's kept on the device
+      // the gold "working" look, not red: nothing is lost, it's kept on the device
       return {
         long: pending > 0 ? `Offline — ${plural(pending, "change", "changes")} kept on this device` : "Offline — changes are kept on this device",
         short: pending > 0 ? `Offline · ${pending}` : "Offline",

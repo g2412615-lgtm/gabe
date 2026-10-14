@@ -219,12 +219,12 @@ describe("stale and concurrent replies", () => {
     a.store.updateCircle(circleId, { x: 0.5 });
     await tick(DEBOUNCE_MS);
     a.net.held[0].arrive(); // the server applies the move (rev 2)…
-    server.edit("circle", circleId, { color: "purple" }); // …then the iPad recolours (rev 3)
+    server.edit("circle", circleId, { color: "black" }); // …then the iPad recolours (rev 3)
     await a.store.pull(); // the device sees rev 3 first
-    expect(a.store.getState().circleById.get(circleId)).toMatchObject({ x: 0.5, color: "purple", rev: 3 });
+    expect(a.store.getState().circleById.get(circleId)).toMatchObject({ x: 0.5, color: "black", rev: 3 });
     a.net.held[0].reply(); // the slow rev-2 reply
     await settle();
-    expect(a.store.getState().circleById.get(circleId)).toMatchObject({ x: 0.5, color: "purple", rev: 3 });
+    expect(a.store.getState().circleById.get(circleId)).toMatchObject({ x: 0.5, color: "black", rev: 3 });
     expect(a.store.getState().save.state).toBe("saved");
   });
 

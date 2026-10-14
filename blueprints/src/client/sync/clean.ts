@@ -3,12 +3,19 @@
 // is already the value the server will store, so a save's echo never makes
 // the text jump or a circle hop.
 
-import { CIRCLE_COLORS, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MAX_LABEL_CHARS, MAX_PLAN_NAME_CHARS, MAX_TITLE_CHARS, MIN_CIRCLE_R } from "../../shared/constants";
+import { CIRCLE_COLORS, circleColorOf, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MAX_LABEL_CHARS, MAX_PLAN_NAME_CHARS, MAX_TITLE_CHARS, MIN_CIRCLE_R } from "../../shared/constants";
 import { EDITABLE, type CircleColor, type EntityKind } from "../../shared/types";
 
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 export const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+/** A current colour key (the UI looks palettes up by it). Old names are not: see toColor. */
 export const isColor = (v: unknown): v is CircleColor => typeof v === "string" && Object.prototype.hasOwnProperty.call(CIRCLE_COLORS, v);
+/**
+ * The colour a value means, as the server reads it: a current key, or a
+ * pre-rebrand name ("amber" → "gold", "purple" → "black") from a change
+ * made before the update; undefined for anything else.
+ */
+export const toColor = (v: unknown): CircleColor | undefined => circleColorOf(v);
 
 /** Remove NUL and other C0 control characters except tab/newline/CR (as the server does). */
 export function stripControls(s: string): string {
@@ -49,9 +56,11 @@ export function cleanPatch(kind: EntityKind, patch: Record<string, unknown>): Re
       case "r":
         if (isFiniteNumber(v)) out[f] = clamp(v, MIN_CIRCLE_R, MAX_CIRCLE_R);
         break;
-      case "color":
-        if (isColor(v)) out[f] = v;
+      case "color": {
+        const c = toColor(v);
+        if (c) out[f] = c;
         break;
+      }
       case "title":
         if (typeof v === "string") out[f] = cleanText(v, MAX_TITLE_CHARS);
         break;

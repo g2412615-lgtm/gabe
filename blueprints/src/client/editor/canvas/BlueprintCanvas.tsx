@@ -5,7 +5,7 @@
 //
 //   .bp-canvas            fills the stage (the stage must be position: relative)
 //     .bp-surface         every gesture lands here; children take no pointer events
-//       .bp-sheet         white paper + shadow, screen px
+//       .bp-sheet         white paper with a 1px edge, screen px
 //       .bp-raster        preview + deep-zoom tiles, world px, one CSS transform
 //       svg.bp-annos      circles (world group) + selection/handles (screen px)
 //       .bp-hold          long-press rings

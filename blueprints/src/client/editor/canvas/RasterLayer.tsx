@@ -1,4 +1,4 @@
-// The blueprint itself: a white sheet (screen space, so its shadow keeps a
+// The blueprint itself: a white sheet (screen space, so its edge keeps a
 // constant size), the preview image stretched to the page (always there, so
 // something shows instantly) and, when the screen needs more detail than the
 // preview has, the deep-zoom tiles of the matching level.

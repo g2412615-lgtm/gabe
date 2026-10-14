@@ -1,6 +1,7 @@
-// Home: "Event plans" — DeployMap's events list, for blueprints. A page head
-// with the one primary action (Upload blueprint), a search + sort bar, and a
-// list of plan rows. Dropping a file anywhere on the page starts an upload.
+// Home: "Event plans". Under the gold header band, the screen's one bold
+// black strip holds the headline and the one call to action (Upload
+// blueprint, the gold accent button); then a search + sort bar and the plans
+// as a ruled list. Dropping a file anywhere on the page starts an upload.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api";
@@ -201,111 +202,116 @@ export default function HomePage() {
     return list;
   }, [plans, query, sort]);
 
-  const uploadButton = (
-    <button type="button" className="primary" onClick={() => openUpload()}>
-      <IconUpload size={14} /> Upload blueprint
+  // gold on the black strip, black (primary) in the empty state on the page
+  const uploadButton = (look: "accent" | "primary") => (
+    <button type="button" className={look} onClick={() => openUpload()}>
+      <IconUpload size={15} /> Upload blueprint
     </button>
   );
 
   return (
     <>
       <AppHeader wide />
-      <main className="page wide home">
-        <div className="page-head">
-          <div>
-            <h1>Event plans</h1>
-            <p className="subtitle">Upload a blueprint, circle the spots that matter, and keep your notes right on them.</p>
+      <main className="home">
+        <div className="strip home-strip">
+          <div className="strip-in">
+            <div className="strip-text">
+              <h1>Event plans</h1>
+              <p className="subtitle">Upload a blueprint, circle the spots that matter, and keep your notes right on them.</p>
+            </div>
+            <div className="page-actions">{uploadButton("accent")}</div>
           </div>
-          <div className="page-actions">{uploadButton}</div>
         </div>
 
-        {error && (
-          <div className="banner banner-danger" role="alert">
-            <IconAlert size={15} />
-            <span>{actionError(error, "Your event plans didn't load")}</span>
-            <button type="button" className="small banner-action" onClick={() => void reload()}>
-              <IconRefresh size={13} /> Retry
-            </button>
-          </div>
-        )}
-
-        {status === "loading" && (
-          <div className="home-skeleton" aria-busy="true" aria-label="Loading event plans">
-            <div className="skeleton" />
-            <div className="skeleton" />
-            <div className="skeleton" />
-          </div>
-        )}
-
-        {status === "ready" && plans.length === 0 && !error && (
-          <div className="empty">
-            <EmptyArt />
-            <h3>No event plans yet</h3>
-            <p>Upload a blueprint PDF to start. Each page becomes a sheet you can mark up with circles and comments.</p>
-            <div className="empty-actions">{uploadButton}</div>
-          </div>
-        )}
-
-        {status === "ready" && plans.length > 0 && (
-          <>
-            <div className="home-bar">
-              <div className="home-search">
-                <IconSearch size={14} />
-                <input
-                  ref={searchRef}
-                  type="search"
-                  value={query}
-                  placeholder="Search plans"
-                  aria-label="Search event plans by name"
-                  autoComplete="off"
-                  enterKeyHint="search"
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape" && query) {
-                      e.preventDefault();
-                      setQuery("");
-                    }
-                  }}
-                />
-                {query && (
-                  <button type="button" className="ghost small icon-btn search-clear" aria-label="Clear search" onClick={() => setQuery("")}>
-                    <IconX size={13} />
-                  </button>
-                )}
-              </div>
-              {query && (
-                <span className="home-count" aria-live="polite">
-                  {shown.length} of {plans.length}
-                </span>
-              )}
-              <label className="sort-pick">
-                Sort
-                <select value={sort} onChange={(e) => changeSort(e.target.value as SortKey)}>
-                  {SORTS.map((s) => (
-                    <option key={s.key} value={s.key}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+        <div className="page wide home-body">
+          {error && (
+            <div className="banner banner-danger" role="alert">
+              <IconAlert size={15} />
+              <span>{actionError(error, "Your event plans didn't load")}</span>
+              <button type="button" className="small banner-action" onClick={() => void reload()}>
+                <IconRefresh size={13} /> Retry
+              </button>
             </div>
+          )}
 
-            {shown.length > 0 ? (
-              <div className="event-list">
-                {shown.map((p) => (
-                  <PlanRow key={p.id} plan={p} now={now} leaving={leaving.has(p.id)} onRename={renamePlan} onDelete={deletePlan} />
-                ))}
+          {status === "loading" && (
+            <div className="home-skeleton" aria-busy="true" aria-label="Loading event plans">
+              <div className="skeleton" />
+              <div className="skeleton" />
+              <div className="skeleton" />
+            </div>
+          )}
+
+          {status === "ready" && plans.length === 0 && !error && (
+            <div className="empty">
+              <EmptyArt />
+              <h3>No event plans yet</h3>
+              <p>Upload a blueprint PDF to start. Each page becomes a sheet you can mark up with circles and comments.</p>
+              <div className="empty-actions">{uploadButton("primary")}</div>
+            </div>
+          )}
+
+          {status === "ready" && plans.length > 0 && (
+            <>
+              <div className="home-bar">
+                <div className="home-search">
+                  <IconSearch size={14} />
+                  <input
+                    ref={searchRef}
+                    type="search"
+                    value={query}
+                    placeholder="Search plans"
+                    aria-label="Search event plans by name"
+                    autoComplete="off"
+                    enterKeyHint="search"
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape" && query) {
+                        e.preventDefault();
+                        setQuery("");
+                      }
+                    }}
+                  />
+                  {query && (
+                    <button type="button" className="ghost small icon-btn search-clear" aria-label="Clear search" onClick={() => setQuery("")}>
+                      <IconX size={13} />
+                    </button>
+                  )}
+                </div>
+                {query && (
+                  <span className="home-count" aria-live="polite">
+                    {shown.length} of {plans.length}
+                  </span>
+                )}
+                <label className="sort-pick">
+                  Sort
+                  <select value={sort} onChange={(e) => changeSort(e.target.value as SortKey)}>
+                    {SORTS.map((s) => (
+                      <option key={s.key} value={s.key}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
-            ) : (
-              <p className="home-none">
-                No event plans match “{query.trim()}”.{" "}
-                <button type="button" className="link" onClick={() => setQuery("")}>
-                  Show all
-                </button>
-              </p>
-            )}
-          </>
-        )}
+
+              {shown.length > 0 ? (
+                <div className="event-list">
+                  {shown.map((p) => (
+                    <PlanRow key={p.id} plan={p} now={now} leaving={leaving.has(p.id)} onRename={renamePlan} onDelete={deletePlan} />
+                  ))}
+                </div>
+              ) : (
+                <p className="home-none">
+                  No event plans match “{query.trim()}”.{" "}
+                  <button type="button" className="link" onClick={() => setQuery("")}>
+                    Show all
+                  </button>
+                </p>
+              )}
+            </>
+          )}
+        </div>
       </main>
 
       {dragging && (

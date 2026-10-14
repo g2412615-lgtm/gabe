@@ -1,6 +1,6 @@
-// The empty-state illustration: DeployMap's grid tile, with circles marked on
-// it instead of dots — two grey rings, one lit amber ring and its comment
-// marker. Purely decorative.
+// The empty-state illustration: a square sheet with a hairline grid and
+// circles marked on it — two ink rings, one "lit" ring filled with KW Gold
+// and its comment marker. Flat, square, purely decorative.
 
 export default function EmptyArt({ className }: { className?: string }) {
   return (

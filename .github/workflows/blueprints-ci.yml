@@ -1,7 +1,7 @@
 # Checks Blueprint Notes (the blueprints/ folder) on every push and pull
 # request that touches it: types, unit + server tests, production build, and
 # the browser tests on desktop and iPad-sized screens.
-name: Blueprint Notes — checks
+name: KWE Blueprints — checks
 
 on:
   push:

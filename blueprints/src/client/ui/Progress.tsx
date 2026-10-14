@@ -1,4 +1,4 @@
-// A thin progress bar: amber fill on a --surface-3 track, with a label
+// A thin progress bar: a KW Gold fill on a hairline track, with a label
 // above ("Uploading…" and, optionally, the percentage on the right).
 
 import type { ReactNode } from "react";

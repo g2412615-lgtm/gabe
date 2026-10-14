@@ -18,7 +18,7 @@ let clientDir: string;
 beforeAll(async () => {
   clientDir = tempDir("bpn-client-");
   fs.mkdirSync(path.join(clientDir, "assets"));
-  fs.writeFileSync(path.join(clientDir, "index.html"), "<!doctype html><title>Blueprint Notes</title><div id=root></div>");
+  fs.writeFileSync(path.join(clientDir, "index.html"), "<!doctype html><title>KWE Blueprints</title><div id=root></div>");
   fs.writeFileSync(path.join(clientDir, "assets", "app-3f9a.js"), "console.log('app')");
   fs.writeFileSync(path.join(clientDir, "icon-192.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   server = await startTestServer({ clientDir, render: false });

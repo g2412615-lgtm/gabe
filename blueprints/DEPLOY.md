@@ -1,10 +1,12 @@
-# Putting Blueprint Notes online
+# Putting KWE Blueprints online
 
-Blueprint Notes runs on Fly.io, like DeployMap, at
+KWE Blueprints runs on Fly.io, like DeployMap, at
 **https://blueprints.gabeweb.com**. It's one small machine with one storage
 volume, which holds the database, your uploaded blueprints and the page
 images. It "suspends" when nobody is using it, so it costs very little, and
 wakes in about a second when you open it.
+
+In GitHub's **Actions** tab the two workflows are **KWE Blueprints — deploy** and **KWE Blueprints — checks** (earlier runs show them under their first name, Blueprint Notes).
 
 You only do the setup below once. After that, every change merged into the
 repository's main branch goes online by itself.
@@ -40,7 +42,7 @@ them straight into the Fly.io, GitHub or Cloudflare pages below.
 ### 3. Run the first deploy
 
 1. In the repository, open the **Actions** tab.
-2. Choose **Blueprint Notes — deploy** on the left.
+2. Choose **KWE Blueprints — deploy** on the left.
 3. Click **Run workflow** and tick **First-time setup**.
 4. Click the green **Run workflow** button.
 
@@ -72,10 +74,10 @@ It then opens full screen like an app, without Safari's address bar.
 
 ## Day to day
 
-- **Updates:** anything merged into the main branch under `blueprints/` deploys by itself. Watch it in **Actions → Blueprint Notes — deploy**. If the main branch has no changes to the app, nothing happens.
+- **Updates:** anything merged into the main branch under `blueprints/` deploys by itself. Watch it in **Actions → KWE Blueprints — deploy**. If the main branch has no changes to the app, nothing happens.
 - **Change the password, or sign out a lost device:**
   1. Update the `BLUEPRINTS_PASSWORD` secret on GitHub.
-  2. Run **Blueprint Notes — deploy** by hand. Leave "First-time setup" unticked.
+  2. Run **KWE Blueprints — deploy** by hand. Leave "First-time setup" unticked.
 
   Changing the password signs out every device, so a lost iPad loses access. Then sign in again on the devices you still have.
 - **Check it's up:** https://blueprints.gabeweb.com/api/health should show `"ok":true`.

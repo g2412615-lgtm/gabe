@@ -1,31 +1,38 @@
-# Blueprint Notes — product and build specification
+# KWE Blueprints — product and build specification
 
 A private web app for one owner (a stadium/event security operations lead,
 not a developer) to mark up event blueprints: upload blueprint PDFs, flip
 between their pages, drop resizable circles on spots, and keep comments on
 each circle. Used on a desktop computer **and an iPad** (touch first-class).
-Every change autosaves continuously. It must look like the owner's existing
-"dot map" app, DeployMap (dark "Graphite + Floodlight" design language).
+Every change autosaves continuously. It wears the Kilowatt Events brand
+(KWE Ops Board kit — see `docs/BRAND.md`); its layout and interactions follow
+the owner's existing "dot map" app, DeployMap.
 
 This file is the contract between the parts of the codebase. Read it fully
 before writing code. When this spec and your instincts disagree, follow the
-spec; when the spec is silent, follow DeployMap's conventions
-(reference reports below) and write the simplest robust thing.
+spec; when the spec is silent, follow `docs/BRAND.md` for the look and
+DeployMap's conventions for behaviour (reference reports below), and write
+the simplest robust thing.
 
 ## 0. Reference material
 
-The design reference is DeployMap, the owner's dot map app (private
-repository `g2412615-lgtm/deploymap`, read-only from here). Its effective
-design tokens and primitives were ported into `src/client/styles/` — treat
-those files as the visual source of truth for this app. DeployMap's
-`app/globals.css`, `components/editor/Canvas.tsx` and RUNBOOK.md are the
-places to look when a new screen needs a pattern this app doesn't have yet.
+The look is the Kilowatt Events brand: `docs/BRAND.md` (rules and logo
+use) and `src/client/styles/tokens.css` (the brand's values under the app's
+token names) are the visual source of truth. The official logo files are in
+`public/brand/` and are shown through `src/client/ui/Logo.tsx`, unaltered.
+
+The layout and interaction reference is DeployMap, the owner's dot map app
+(private repository `g2412615-lgtm/deploymap`, read-only from here); its
+primitives were ported into `src/client/ui/` and `src/client/styles/` and
+then restyled to the brand. DeployMap's `components/editor/Canvas.tsx` and
+RUNBOOK.md are the places to look when a new screen needs an interaction
+pattern this app doesn't have yet.
 
 ## 1. Stack and layout
 
 - Node 22 (`node:sqlite` built in — no native DB driver), TypeScript, ESM.
 - Server: Hono (`hono`, `@hono/node-server`), SQLite via `node:sqlite` `DatabaseSync`, `mupdf` (WASM) + `sharp` for rendering in a separate child process per page.
-- Client: React 19 SPA built by Vite 7. No UI framework, no CSS framework, no state library. Plain CSS files using the DeployMap tokens.
+- Client: React 19 SPA built by Vite 7. No UI framework, no CSS framework, no state library. Plain CSS files using the Kilowatt Events tokens (`tokens.css`).
 - Tests: Vitest (server + unit), Playwright (end-to-end, later).
 
 ```
@@ -65,7 +72,7 @@ See `src/shared/types.ts` (authoritative). Summary:
 - **Plan** (an "event plan"): `name`. Home page lists plans.
 - **Source**: an uploaded file (PDF or PNG/JPEG), kept verbatim on disk.
 - **Page**: one page of a source, in a plan. Owner-editable `label` and `sortOrder`. Server-owned render fields (`status`, sizes, tiles, `assetKey`).
-- **Circle**: on a page. `x`,`y` = centre as fractions of page width/height; `r` = radius as a fraction of the page's **long side**; `color`; optional `title`; server-assigned per-plan `num` (1, 2, 3… never reused; 0 until first save).
+- **Circle**: on a page. `x`,`y` = centre as fractions of page width/height; `r` = radius as a fraction of the page's **long side**; `color` (a `CIRCLE_COLORS` key: `gold` (default), `black`, `red`, `blue`, `green`); optional `title`; server-assigned per-plan `num` (1, 2, 3… never reused; 0 until first save).
 - **Comment**: on a circle. `body` text.
 
 All rows: `createdAt`, `updatedAt`, `deletedAt` (soft delete / tombstone), `rev`.
@@ -140,7 +147,7 @@ same batch). For each op:
    - `comment`: needs `data.circleId` naming a circle of this plan; insert.
    - `plan`/`page`: reject `"unknown"` (those are created by uploads only).
 3. **Row exists:** for each editable field `f` (types.ts `EDITABLE`) present in `data`: apply it when `base` is null or `data[f] !== base[f]`. Never touch non-editable fields (pageId, circleId, num…). If anything changed: `rev += 1`, `updatedAt = now`.
-4. **Clean, don't reject** values: clamp `x`,`y` to [0,1], `r` to [MIN_CIRCLE_R, MAX_CIRCLE_R]; unknown `color` → keep the current (or default); trim/cap strings (`MAX_*_CHARS`); `deletedAt` must be null or a number (use the server's now for any non-null value); `sortOrder` finite.
+4. **Clean, don't reject** values: clamp `x`,`y` to [0,1], `r` to [MIN_CIRCLE_R, MAX_CIRCLE_R]; unknown `color` → keep the current (or default), and read the pre-rebrand names `amber`/`purple` as `gold`/`black` (migration 3 renamed the stored rows); trim/cap strings (`MAX_*_CHARS`); `deletedAt` must be null or a number (use the server's now for any non-null value); `sortOrder` finite.
 5. If any op in the batch changed something, set the plan's `updatedAt = now` (the home list sorts by it).
 
 Reply: `rows` = the current server copy of every row any op referenced
@@ -206,35 +213,35 @@ re-render.
 
 ### 7.1 UI kit (`src/client/ui/`, UI agent)
 
-Port DeployMap's primitives (report-design.md §3, §9) as React components and CSS:
+DeployMap's primitives (report-design.md §3, §9) as React components and CSS, styled to the Kilowatt Events brand:
 
 - `icons.tsx` — DeployMap's Feather-style `Icon` + all icons the app needs: `IconChevron`, `IconChevronLeft`, `IconPlus`, `IconMinus`, `IconUpload`, `IconX`, `IconCheck`, `IconMore`, `IconTrash`, `IconComment`, `IconSidebar`, `IconCircle`, `IconFit`, `IconEdit`, `IconSearch`, `IconArrowLeft`, `IconUndo`, `IconRedo`, `IconHand` (move/pan), `IconLayers` (pages), `IconList` (notes), `IconAlert`, `IconDownload`, `IconLogout`, `IconRefresh`. Same signature: `(p: { size?: number; className?: string }) => JSX`.
-- `BrandMark.tsx` — the 26px tile, re-glyphed as two grey rings + one lit amber ring (see `public/icon-192.png`).
+- `Logo.tsx` — the Kilowatt Events lockup or bulb from `public/brand/`, at the file's own proportions (never below 75 px wide for the lockup), black or white to suit what it sits on (`tone`: `on-gold`, `on-light`, `on-dark`, or `page` to follow the theme).
 - `Toaster.tsx` + `notify.ts` — `notify(message, kind?: "info"|"ok"|"error", opts?: { action?: { label: string; run: () => void }; duration?: number })`. Up to 4 toasts, dedupe by message, ok/info 4 s, error 7 s, action toasts 8 s. `role="status" aria-live="polite"`. Toasts can carry an **Undo** action button.
 - `Dialog.tsx` — accessible modal (`.drawer-overlay` > `.drawer.es-dialog`): `role="dialog" aria-modal aria-labelledby`, Escape closes, click outside closes, focus first field / primary button, returns focus. Plus `confirmDialog({ title, body, confirmLabel, danger? }): Promise<boolean>` mounted via a portal host (no native `confirm()`).
 - `Menu.tsx` — DeployMap's HeaderMenu (`.hmenu`, `.hmenu-pop`) with Escape, outside `pointerdown`, `aria-haspopup`/`aria-expanded`, `role="menu"`/`menuitem`, arrow-key navigation, items `{ label, icon?, danger?, disabled?, onSelect }` plus separators. Pop-up flips/aligns to stay on screen (prop `align: "left" | "right"`).
 - `InlineRename.tsx` — DeployMap's `.model-name-input` pattern: borderless input, commits on blur and Enter, Escape reverts, `onCommit(value)` only when changed and non-empty. Also controllable `editing` mode for "Rename" menu items.
 - `Dropzone.tsx` — DeployMap's `.dropzone` label with hidden `<input type="file">` (accept `UPLOAD_ACCEPT`, `multiple` prop), drag-over state, keyboard accessible.
-- `Progress.tsx` — thin progress bar (amber fill on `--surface-3` track) with label.
-- `Spinner.tsx`, `SaveStatus.tsx` (the `.save-status` pill — states in §7.4), `EmptyArt.tsx` (`.empty-art` with rings instead of dots).
-- `AppHeader.tsx` — sticky translucent header: BrandMark + "Blueprint Notes", right side: a `Menu` with "Sign out" (POST /api/logout then navigate to /login).
+- `Progress.tsx` — thin progress bar (KW Gold fill on a hairline track) with label.
+- `Spinner.tsx`, `SaveStatus.tsx` (the `.save-status` tag — states in §7.4), `EmptyArt.tsx` (`.empty-art`: a sheet with ink rings and one gold-filled circle).
+- `AppHeader.tsx` — the sticky gold header band (72 px, 64 px on phones; gold with black content in both themes): `lockup-black.png` at 34 px tall, a 2 px black divider and the product name "Blueprints" in Montserrat 900; right side: a `Menu` with "Sign out" (POST /api/logout then navigate to /login).
 
 ### 7.2 Styles (UI agent: tokens.css, base.css, components.css)
 
-- `tokens.css`: DeployMap's `:root` block verbatim (report-design.md §2) minus legacy aliases, plus `--canvas-paper: #ffffff`, `--hit: 44px`, and `--font` without the next/font variable: `"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif` (Inter is NOT loaded from Google — the system font is fine; do not add external font requests: the CSP forbids them).
-- `base.css`: DeployMap base elements (report-design §3.1), `html, body { height: 100%; overscroll-behavior: none }`, `body { background: var(--bg) }`, `#root { min-height: 100% }`, focus ring, selection, reduced-motion rule, `-webkit-tap-highlight-color: transparent`, `touch-action: manipulation` on interactive elements.
+- `tokens.css`: the app's token names (`--bg`, `--surface*`, `--border*`, `--text*`, `--accent*`, …) mapped to the Kilowatt Events values, light by default and dark via `prefers-color-scheme` / `<html data-theme>`; radii 0; shadows only for floating UI; plus `--canvas-paper: #ffffff` and `--hit: 44px`. Fonts: `--font-head` is Montserrat (600/800/900, self-hosted through `@fontsource/montserrat`, imported in `main.tsx`); `--font` is `"Aptos", "Segoe UI", -apple-system, …, sans-serif` (Aptos isn't hosted). Do not add external font requests: the CSP forbids them.
+- `base.css`: base elements (h1–h3 in Montserrat 900, gold focus ring and selection, gold link underline), `html, body { height: 100%; overscroll-behavior: none }`, `body { background: var(--bg) }`, `#root { min-height: 100% }`, focus ring, selection, reduced-motion rule, `-webkit-tap-highlight-color: transparent`, `touch-action: manipulation` on interactive elements.
 - `components.css`: buttons (all variants), inputs/select/textarea, `.field`, `.card*`, `.event-list`/`.event-row`, `.pill`/`.chip`, `.banner*`, `.empty*`, `.skeleton`, `.spinner`, `.toaster`/`.toast*`, `.hmenu*`, `.drawer*`/`.es-dialog*`, `.app-header*`, `.brand*`, `.page*`, `.eyebrow`, `.subtitle`, `.dropzone`, `.upload-line`, `.model-name-input`, `.save-status`, `.hdr-group`, `.evtabs`, `.caps`, `.muted`, `kbd`, `.login-card`.
 - **Touch sizing** (DeployMap has none — required here): `@media (pointer: coarse) { … }` gives buttons, menu items, list rows and form controls a ≥ 44px hit size (min-height or padding), and inputs/textareas `font-size: 16px` (stops iOS focus-zoom). Hover styles that would stick after a tap are wrapped in `@media (hover: hover)`.
 - Use `100dvh` (with a `100vh` fallback) for full-height layouts; respect `env(safe-area-inset-*)` in fixed bars.
 
 ### 7.3 Screens owned by the UI agent
 
-**Login (`src/client/auth/LoginPage.tsx`)** — centred `.login-card` on `--bg`: BrandMark + "Blueprint Notes", h1 "Sign in", one password field (`autocomplete="current-password"`, plus a hidden `username` input with value `owner` so password managers behave), primary "Sign in" (spinner + "Signing in…"), `.error-text` with the server's message. On success navigate to `next`.
+**Login (`src/client/auth/LoginPage.tsx`)** — a plain page with a thin gold bar on top and a centred `.login-card`: the lockup (black or white by theme), a 2 px rule, h1 "Blueprints" (Montserrat 900, uppercase), a one-line lead, one password field (`autocomplete="current-password"`, plus a hidden `username` input with value `owner` so password managers behave), primary "Sign in" (black with gold text; spinner + "Signing in…"), `.error-text` with the server's message. On success navigate to `next`.
 
 **Home (`src/client/home/HomePage.tsx`)** — "Event plans":
-- `AppHeader`, then `.page.wide`: `.page-head` with h1 "Event plans", subtitle "Upload a blueprint, circle the spots that matter, and keep your notes right on them.", primary button `IconUpload` "Upload blueprint".
+- `AppHeader`, then the screen's one black strip (`.strip.home-strip`): h1 "Event plans" in Montserrat 900, subtitle "Upload a blueprint, circle the spots that matter, and keep your notes right on them.", and the gold accent button `IconUpload` "Upload blueprint". Then `.page.wide.home-body` with the rest.
 - A `.home-bar`: search input (filters by name, with `IconSearch`), sort select (Recently edited / Name / Newest).
-- List of `.event-row`: thumbnail (first page `thumb.webp`, ~88×62 on white, `object-fit: contain`, placeholder when not rendered), name (a `Link` to `/plans/:id`), meta line `N pages · N circles · N comments · edited <relative time>` (`.dot-sep` items), a `.pill.warn` "Preparing N pages…" while `pendingPages > 0`; row actions: "Open" button + `Menu` (⋯) with Rename (switches the name to `InlineRename`), Delete… (danger). Whole row is easy to tap on iPad (the name link covers the row's text area; buttons stay separate).
+- A ruled list (2 px strong top rule, 1 px hairlines between rows) of `.event-row`: thumbnail (first page `thumb.webp`, ~88×62 on white, `object-fit: contain`, placeholder when not rendered), name (a `Link` to `/plans/:id`), meta line `N pages · N circles · N comments · edited <relative time>` (`.dot-sep` items), a `.pill.warn` "Preparing N pages…" while `pendingPages > 0`; row actions: "Open" button + `Menu` (⋯) with Rename (switches the name to `InlineRename`), Delete… (danger). Whole row is easy to tap on iPad (the name link covers the row's text area; buttons stay separate).
 - Delete: `confirmDialog` ("Delete “<name>”?", "Its pages, circles and comments go with it. You can undo this right after.", danger "Delete plan") → `api.patchPlan(id, { deleted: true })` → remove from the list → toast "Deleted “<name>”." with **Undo** (`patchPlan(id, { deleted: false })` and reload).
 - Upload: the button opens a `Dialog` "Upload a blueprint" with a `Dropzone` ("Drop a blueprint here" / "or tap to choose a file · PDF, PNG or JPG up to 150 MB"), a "Plan name" field prefilled from the file name, and "Upload" (primary). While uploading: `Progress` with "Uploading… 42%", cancel button (aborts). On success navigate to `/plans/<id>`. Dropping a file anywhere on the home page opens the same dialog with the file chosen.
 - Empty state (`.empty` + rings `EmptyArt`): "No event plans yet" / "Upload a blueprint PDF to start. Each page becomes a sheet you can mark up with circles and comments." + Upload button.
@@ -315,8 +322,8 @@ Engine rules (see report-state.md §9 — follow it, with these decisions):
 - New circles: `num: 0`, `title: ""`, `color` default `DEFAULT_CIRCLE_COLOR`, `createdAt: Date.now()`. Show provisional numbers in the UI as "•" until the server assigns (the editor handles display).
 - Unit tests in `tests/unit/` for: merge3 cases, diffing/coalescing, flush success adopting num, edits during an in-flight request survive, offline → retry → saved, 401 → signedOut → resumes, outbox restore on load (including a create that never reached the server), undo/redo of add/move/delete, comment typing coalescing, rebase on pull. Mock `api` (inject a transport into `createPlanStore` for tests: `createPlanStore(planId, { transport?, storage?, now? })`).
 
-Save pill labels (DeployMap tone): saved → "Saved"; pending/saving → "Saving…";
-offline → "Offline — N changes kept on this device" (amber `dirty` style,
+Save tag labels (DeployMap tone): saved → "Saved"; pending/saving → "Saving…";
+offline → "Offline — N changes kept on this device" (gold `dirty` style,
 nothing is lost); error → "Not saved — tap to retry" (red); signedOut →
 "Signed out" (red) plus the editor banner.
 
@@ -349,12 +356,12 @@ export interface BlueprintCanvasProps {
 ```
 
 Rendering:
-- A `.bp-canvas` div (fills its parent, `touch-action: none`, `overscroll-behavior: none`, no text selection, `-webkit-touch-callout: none`) on the dot-grid canvas background (`--canvas-bg` + 22px dot grid).
-- Raster layer: a div with `transform: translate(tx,ty) scale(scale)`, `transform-origin: 0 0`, containing: a white paper rect (`page.width × page.height`, `--shadow-paper`), the preview `<img>` stretched to page size (always present), and, when `pickLevel()` returns a level, the visible tiles of that level as absolutely positioned `<img>`s in world coordinates (each tile box enlarged by 1/scale world px right/bottom to hide seams; fade in on load; `draggable=false`, `decoding="async"`). Only tiles intersecting the viewport (+1 tile margin) are mounted. Keep the previous level's loaded tiles visible until the new level's tiles in view have loaded (no flash to blurry). Don't set a permanent `will-change: transform`.
-- Annotation layer: an `<svg>` the size of the viewport with a `<g transform="translate scale">`: each circle as `<g class="anno …">` with a glow ring (wide translucent stroke), body circle (`fill` = palette fill, `stroke` = palette stroke, `vector-effect: non-scaling-stroke`, 2px), and a number badge (a small pill at the circle's top, constant screen size, showing `num` or "•"). Lit state (hovered, selected, or `litId`): stroke 3px, glow visible (opacity transition 120 ms), fill a bit stronger, and a gentle pulse of the glow (disabled under reduced motion). A circle smaller than 10 screen px is drawn at 10 px (and hit-tested at ≥ 22 px on touch, ≥ 12 px with a mouse).
-- Selected circle: the lit look + a dashed outer ring + **four resize handles** (N, E, S, W) drawn in screen space: 12 px white dots with the circle's stroke colour border, each with an invisible 44 px hit target.
-- Zoom controls (bottom-right, floating, DeployMap `.zoom-controls` look): − , percentage (fit = 100%), +, Fit (`IconFit`). 44 px targets on coarse pointers.
-- Add mode: cursor crosshair; a floating hint at the top (DeployMap `.focus-toolbar` look, amber border): "Tap the blueprint to add a circle — drag to size it" + Cancel (calls `onAdd`? no: the editor owns the mode; render the hint with a Cancel button that calls a prop `onCancelAdd?()` — add this optional prop).
+- A `.bp-canvas` div (fills its parent, `touch-action: none`, `overscroll-behavior: none`, no text selection, `-webkit-touch-callout: none`) on the plain canvas background (`--canvas-bg`).
+- Raster layer: a div with `transform: translate(tx,ty) scale(scale)`, `transform-origin: 0 0`, containing: a white paper rect (`page.width × page.height`, flat, with a 1 px `--border` edge), the preview `<img>` stretched to page size (always present), and, when `pickLevel()` returns a level, the visible tiles of that level as absolutely positioned `<img>`s in world coordinates (each tile box enlarged by 1/scale world px right/bottom to hide seams; fade in on load; `draggable=false`, `decoding="async"`). Only tiles intersecting the viewport (+1 tile margin) are mounted. Keep the previous level's loaded tiles visible until the new level's tiles in view have loaded (no flash to blurry). Don't set a permanent `will-change: transform`.
+- Annotation layer: an `<svg>` the size of the viewport with a `<g transform="translate scale">`: each circle as `<g class="anno …">` with a glow ring (wide translucent stroke), body circle (`fill` = palette fill, `stroke` = palette stroke, `vector-effect: non-scaling-stroke`, 2px), and a number badge (a small black square with gold figures at the circle's top, constant screen size, showing `num` or "•"). Lit state (hovered, selected, or `litId`): stroke 3px, glow visible (opacity transition 120 ms), fill a bit stronger, and a gentle pulse of the glow (disabled under reduced motion). A circle smaller than 10 screen px is drawn at 10 px (and hit-tested at ≥ 22 px on touch, ≥ 12 px with a mouse).
+- Selected circle: the lit look + a dashed outer ring + **four resize handles** (N, E, S, W) drawn in screen space: 12 px white squares with a black border, each with an invisible 44 px hit target.
+- Zoom controls (bottom-right, floating square panel with a soft shadow): − , percentage (fit = 100%), +, Fit (`IconFit`). 44 px targets on coarse pointers.
+- Add mode: cursor crosshair; a floating hint at the top (a black bar with white text and a gold Cancel link): "Tap the blueprint to add a circle — drag to size it" + Cancel (calls `onAdd`? no: the editor owns the mode; render the hint with a Cancel button that calls a prop `onCancelAdd?()` — add this optional prop).
 
 Gestures (implement the multi-pointer state machine from report-canvas.md §7.2–7.4; pointer events + pointer capture; always match `pointerId`; handle `pointercancel`/`lostpointercapture`):
 - Wheel / trackpad: zoom around the cursor like DeployMap (`exp(-delta * speed)`, ctrlKey pinch faster), native listener `{ passive: false }`. Safari `gesturestart/change/end` for Mac trackpad pinch (ignored while touch pointers are down).
@@ -389,9 +396,9 @@ div.ed-body
     aside.ed-right (CommentsPanel, floats over the stage's right edge — never resizes the canvas)
 ```
 
-- **Header**: back link `IconArrowLeft` "Plans" (flushes first). Plan name inline-renamable (`store.renamePlan`). Page switcher: prev/next icon buttons + "Page 2 of 6" + the page label (click opens the left sidebar on Pages). Mode group (`.hdr-group`, segmented): "Move" (`IconHand`) and "Circle" (`IconCircle`, toggled amber underline when active) — keyboard `V`/`C`. Undo/Redo icon buttons (disabled states). `SaveStatus` pill (tap = `flushNow()`). Help `Menu` (`?`) listing shortcuts with `<kbd>` and gestures for iPad. Below 1100 px labels collapse to icons (with `aria-label`/`title`); below 820 px the header wraps to two rows (DeployMap's narrow header rule).
-- **Left sidebar** (`PageSidebar.tsx`): width 280 px; collapsible to a 56 px rail (page number buttons 1…N with the active one marked, plus an expand button). Collapse state persists in localStorage (`bpn-left-collapsed`). Below 900 px wide it's an overlay drawer (with a scrim) that closes after choosing a page. Tabs at the top (`.evtabs` look): **Pages** and **Notes** (with counts).
-  - Pages tab: rows with thumbnail (white, contain, ~96×68), label (two lines max), "N circles" meta, active row = surface-3 + amber left bar; status: spinner + "Preparing…" (queued/rendering), "Sharpening…" small note while `preview`, failed → red "Couldn't prepare this page" + Retry (`api.retryPage` then `store.refreshPages()`). Row `Menu` (⋯, always visible on touch): Rename (inline), Move up, Move down, Delete page…. Double-click a label to rename on desktop. Footer: "Add pages" button (`IconUpload`) → file picker (multiple, `UPLOAD_ACCEPT`) → sequential uploads via `uploadFile(file, { planId })` with a `Progress` row per file; each success → `store.mergePages(res.pages)`; errors → toast.
+- **Header**: back link `IconArrowLeft` "Plans" (flushes first). Plan name inline-renamable (`store.renamePlan`). Page switcher: prev/next icon buttons + "Page 2 of 6" + the page label (click opens the left sidebar on Pages). Mode group (`.hdr-group`, segmented): "Move" (`IconHand`) and "Circle" (`IconCircle`; the active mode is black with gold text) — keyboard `V`/`C`. Undo/Redo icon buttons (disabled states). `SaveStatus` tag (tap = `flushNow()`). Help `Menu` (`?`) listing shortcuts with `<kbd>` and gestures for iPad. Below 1100 px labels collapse to icons (with `aria-label`/`title`); below 820 px the header wraps to two rows (DeployMap's narrow header rule).
+- **Left sidebar** (`PageSidebar.tsx`): width 280 px; collapsible to a 56 px rail (page number buttons 1…N with the active one marked, plus an expand button). Collapse state persists in localStorage (`bpn-left-collapsed`). Below 900 px wide it's an overlay drawer (with a scrim) that closes after choosing a page. Tabs at the top (`.evtabs`, the open one with a 4 px gold underline): **Pages** and **Notes** (with counts).
+  - Pages tab: rows with thumbnail (white, contain, ~96×68), label (two lines max), "N circles" meta, active row = soft gold fill (`--accent-soft`) + 6 px gold left bar; status: spinner + "Preparing…" (queued/rendering), "Sharpening…" small note while `preview`, failed → red "Couldn't prepare this page" + Retry (`api.retryPage` then `store.refreshPages()`). Row `Menu` (⋯, always visible on touch): Rename (inline), Move up, Move down, Delete page…. Double-click a label to rename on desktop. Footer: "Add pages" button (`IconUpload`) → file picker (multiple, `UPLOAD_ACCEPT`) → sequential uploads via `uploadFile(file, { planId })` with a `Progress` row per file; each success → `store.mergePages(res.pages)`; errors → toast.
   - Delete page: `confirmDialog` ("Delete page “A-101”?", "Its N circles and N comments go with it. You can undo this right after.") → `store.deletePage` → toast with Undo (`store.restorePage`). If it was the open page, open the nearest remaining page.
   - Notes tab (`NotesList.tsx`): every circle in the plan grouped by page (page order), each row: colour dot, `#num`, title (or the first comment's first line, or "No comments yet" muted), comment count; a filter toggle "This page / All pages"; hovering a row lights that circle (`litId`); clicking a row opens its page, selects the circle and calls `canvas.focusCircle`.
 - **Stage**: if the current page is `queued`/`rendering` → centred placeholder card ("Preparing page… This takes a few seconds for big sheets." with spinner); `failed` → message + Retry; no pages → empty state with "Add pages" (Dropzone). Otherwise `BlueprintCanvas`. Remember each page's last view in memory (Map pageId → View) and pass it as `initialView`; give the canvas `key={page.id}`. Poll `store.refreshPages()` every 1.5 s while any page is queued/rendering/preview.
@@ -399,7 +406,7 @@ div.ed-body
   - `selectedId` (pinned) and `hoverId` (from canvas `onHover`, mouse/pen only).
   - Panel shows `hoverId` when it's set and the panel isn't "busy" (the pointer is over the panel, an inline comment edit is open, or the title/composer field has focus AND holds text — an empty focused composer doesn't count); otherwise `selectedId`. While the panel shows, the canvas gets `rightInset` (or `bottomInset` for the phone sheet) and `revealCircle` slides a selected/added circle — or a hovered one under the panel — into view. When the hover ends, keep showing the hovered circle for 700 ms (so the pointer can travel into the panel); entering the panel cancels that and **pins** the hovered circle (becomes `selectedId`). Leaving the panel without interacting lets it fall back/close.
   - Touch: tap a circle → select (panel opens); tap paper → deselect (panel closes); tap another circle → switch.
-  - Panel contents (DeployMap side-panel look, width 340 px, floats at the right of the stage with `--shadow-3`, full stage height, slides in 160 ms; on narrow screens (< 700 px) it's a bottom sheet at 60 % height):
+  - Panel contents (laid out like DeployMap's side panel, width 340 px, floats at the right of the stage with `--shadow-3`, full stage height, slides in 160 ms; on narrow screens (< 700 px) it's a bottom sheet at 60 % height):
     - Header: colour dot, "Circle #12" (or "New circle" while `num` is 0), close button (deselect).
     - Title field (`InlineRename`-like, placeholder "Name this spot (optional)").
     - Colour swatches (5 palette colours, 32 px, 44 px hit on touch) and a "Size" slider (log scale between MIN and MAX_CIRCLE_R, live updates via begin/updateCircle(live)/endGesture).
@@ -412,7 +419,7 @@ div.ed-body
 - **URL**: keep `?page=<id>` (and `&circle=<id>` when one is selected) in sync with `replaceQuery`; honour `initialPageId`/`initialCircleId` on load (focus that circle).
 - **Leaving**: `addLeaveGuard` flushes (fire-and-forget) — never block navigation; the outbox keeps anything unsent. `store.dispose()` on unmount.
 - **Banners**: `signedOut` → `.editor-banner` "Signed out — your changes are kept on this device. Sign in to finish saving." + "Sign in" button (`goToLogin()`); `notFound` → full-page message with a link home; `loadError` → full-page message with retry spinner.
-- Document title: `<plan name> · Blueprint Notes`.
+- Document title: `<plan name> · KWE Blueprints`.
 
 `editor.css` holds all `.ed-*` styles.
 

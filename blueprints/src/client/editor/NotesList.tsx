@@ -4,12 +4,13 @@
 // choosing one opens its page, selects it and zooms to it.
 
 import { memo, useState, type PointerEvent } from "react";
-import { CIRCLE_COLORS } from "../../shared/constants";
+import { CIRCLE_COLORS, DEFAULT_CIRCLE_COLOR } from "../../shared/constants";
 import type { CircleRow, PageRow } from "../../shared/types";
 import { IconComment } from "../ui/icons";
 import { usePlanState, type PlanStore } from "../sync";
 import { circleSummary, circleTag, plural } from "./format";
 import { PREF_NOTES_SCOPE, readPref, writePref } from "./prefs";
+import { paperSwatch } from "./swatch";
 
 type Scope = "page" | "all";
 
@@ -77,7 +78,7 @@ function NotesList({ store, currentPageId, selectedId, onLit, onOpen }: NotesLis
                 const comments = commentsByCircle.get(c.id);
                 const n = comments?.length ?? 0;
                 const text = circleSummary(c, comments);
-                const pal = CIRCLE_COLORS[c.color];
+                const pal = CIRCLE_COLORS[c.color] ?? CIRCLE_COLORS[DEFAULT_CIRCLE_COLOR];
                 return (
                   <li key={c.id}>
                     <button
@@ -89,7 +90,7 @@ function NotesList({ store, currentPageId, selectedId, onLit, onOpen }: NotesLis
                       onFocus={() => onLit(c.id)}
                       onBlur={() => onLit(null)}
                     >
-                      <span className="nl-dot" style={{ background: pal.fill, borderColor: pal.stroke }} aria-hidden="true" />
+                      <span className="nl-dot" style={paperSwatch(pal)} aria-hidden="true" />
                       <span className="nl-num">{circleTag(c)}</span>
                       <span className={`nl-text${text ? "" : " none"}`}>{text || "No comments yet"}</span>
                       {n > 0 && (

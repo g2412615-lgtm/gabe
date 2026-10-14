@@ -574,7 +574,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
           <span>
             <b>Signed out</b> — your changes are kept on this device. Sign in to finish saving.
           </span>
-          <button type="button" className="small" onClick={goToLogin}>
+          <button type="button" className="small primary" onClick={goToLogin}>
             Sign in
           </button>
         </div>

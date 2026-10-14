@@ -28,7 +28,7 @@
 import { DEFAULT_CIRCLE_COLOR, MAX_CIRCLE_R, MIN_CIRCLE_R } from "../../shared/constants";
 import { editableOf, sameValue } from "../../shared/merge";
 import { EDITABLE, type CircleRow, type CommentRow, type EntityKind, type PageRow, type PlanRow, type RowByKind } from "../../shared/types";
-import { clamp, isColor, isFiniteNumber } from "./clean";
+import { clamp, isColor, isFiniteNumber, toColor } from "./clean";
 import type { StorageLike } from "./types";
 
 export const OUTBOX_VERSION = 2;
@@ -117,7 +117,7 @@ export function normalizeRow(kind: EntityKind, id: string, planId: string, raw: 
         x: clamp(raw.x, 0, 1),
         y: clamp(raw.y, 0, 1),
         r: clamp(raw.r, MIN_CIRCLE_R, MAX_CIRCLE_R),
-        color: isColor(raw.color) ? raw.color : DEFAULT_CIRCLE_COLOR,
+        color: toColor(raw.color) ?? DEFAULT_CIRCLE_COLOR, // "amber"/"purple" from before the rebrand → gold/black
         title: str(raw.title),
         num: num(raw.num),
       };
@@ -129,6 +129,17 @@ export function normalizeRow(kind: EntityKind, id: string, planId: string, raw: 
       return row;
     }
   }
+}
+
+/**
+ * Stored editable fields with a pre-rebrand colour name ("amber", "purple")
+ * read as today's (gold, black), as the server renamed its rows: an outbox
+ * left by the previous version must compare with them, not against them.
+ */
+function currentColor(fields: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!fields || isColor(fields.color)) return fields;
+  const c = toColor(fields.color);
+  return c ? { ...fields, color: c } : fields;
 }
 
 /** Parse an outbox's stored text (anything unreadable counts as empty). */
@@ -149,8 +160,8 @@ export function parseStored(planId: string, text: string | null): StoredOutbox {
     if (!k || !isObj(e)) continue;
     const local = normalizeRow(k.kind, k.id, planId, e.local);
     if (!local) continue;
-    const base = isObj(e.base) ? e.base : null;
-    const sent = v1 ? editableOf(k.kind, local) : isObj(e.sent) ? e.sent : null;
+    const base = currentColor(isObj(e.base) ? e.base : null);
+    const sent = v1 ? editableOf(k.kind, local) : currentColor(isObj(e.sent) ? e.sent : null);
     const entry: OutboxEntry = { kind: k.kind, id: k.id, local, base, sent };
     // v2: the text exactly as written (a store compares it with what it wrote); v1: converted
     out.entries.set(key, { entry, json: v1 ? entryJson(entry) : JSON.stringify(e) });

@@ -1,5 +1,10 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
+// Montserrat, the brand's headline face, served from this app (no font CDN:
+// the CSP allows 'self' only). Latin only, the three weights the brand uses.
+import "@fontsource/montserrat/latin-600.css";
+import "@fontsource/montserrat/latin-800.css";
+import "@fontsource/montserrat/latin-900.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/components.css";

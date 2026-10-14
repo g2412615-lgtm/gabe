@@ -42,10 +42,16 @@ const LIT_FILL: Record<string, string> = Object.fromEntries(
   Object.entries(CIRCLE_COLORS).map(([k, p]) => [k, p.fill.replace(/[\d.]+\)\s*$/, (a) => `${Math.min(0.4, parseFloat(a) * 1.8).toFixed(3)})`)]),
 );
 
-/** Badge pill width (screen px) for a label of n characters. */
-const badgeWidth = (n: number) => Math.max(18, 8 + n * 6.6);
+/** Badge chip width (screen px) for a label of n characters (Montserrat's figures run wide). */
+const badgeWidth = (n: number) => Math.max(18, 9 + n * 7);
 /** On the selected circle the badge rides above the N handle and the dashed ring instead of under them. */
 const SELECTED_BADGE_LIFT = 22;
+/**
+ * Half the side of the grip's square chip (screen px): its corners stay
+ * inside the grip's smallest hit radius (a mouse's), so what's drawn is
+ * what a press finds.
+ */
+const GRIP_HALF = Math.min(GRIP_R, Math.floor(GRIP_HIT_R.mouse / Math.SQRT2));
 /** Feather's "move" glyph (four arrows), centred on 0,0, 14 px across. */
 const GRIP_GLYPH = "M0 -7V7M-7 0H7M-2.6 -4.4L0 -7L2.6 -4.4M-2.6 4.4L0 7L2.6 4.4M-4.4 -2.6L-7 0L-4.4 2.6M4.4 -2.6L7 0L4.4 2.6";
 
@@ -74,9 +80,9 @@ const CircleMark = memo(function CircleMark({ cx, cy, r, color, num, lit, select
     <g className={`bp-anno${lit ? " lit" : ""}${selected ? " sel" : ""}`} data-color={color}>
       <circle className="bp-anno-glow" cx={cx} cy={cy} r={r} stroke={p.glow} />
       <circle className="bp-anno-body" cx={cx} cy={cy} r={r} fill={lit ? LIT_FILL[color] ?? p.fill : p.fill} stroke={p.stroke} />
-      {/* number badge: a pill on the circle's top edge, constant screen size (transform: sizeMarks) */}
+      {/* number badge: a black chip with gold figures on the circle's top edge, constant screen size (transform: sizeMarks; colours: canvas.css) */}
       <g className="bp-badge">
-        <rect x={-bw / 2} y={-9 - lift} width={bw} height={18} rx={9} fill={p.stroke} />
+        <rect x={-bw / 2} y={-9 - lift} width={bw} height={18} />
         <text x={0} y={-lift} dy="0.35em" textAnchor="middle">
           {label}
         </text>
@@ -204,26 +210,26 @@ function SelectionMarks({ c, page, view, coarse, grip }: { c: CircleRow; page: P
   const centre = worldToScreen(view, { x: w.cx, y: w.cy });
   const R = drawRadius(w.r, view.scale);
   const ring = handleRing(R, coarse);
-  const p = palette(c.color);
   const stalk = ring - HANDLE_DOT_R > R + 7;
+  // ink, whatever the circle's colour (canvas.css): a dashed ring, white square handles, a black grip
   return (
     <g className="bp-selection">
-      <circle className="bp-sel-ring" cx={centre.x} cy={centre.y} r={R + 7} stroke={p.stroke} />
+      <circle className="bp-sel-ring" cx={centre.x} cy={centre.y} r={R + 7} />
       {HANDLE_DIRS.map((dir) => {
         const h = handlePoint(centre, ring, dir);
         const s = stalk ? handlePoint(centre, R + 7, dir) : null;
         return (
           <g key={dir} className={`bp-handle bp-handle-${dir}`}>
-            {s && <line className="bp-handle-stalk" x1={s.x} y1={s.y} x2={h.x} y2={h.y} stroke={p.stroke} />}
+            {s && <line className="bp-handle-stalk" x1={s.x} y1={s.y} x2={h.x} y2={h.y} />}
             <circle className="bp-handle-hit" cx={h.x} cy={h.y} r={coarse ? HANDLE_HIT_R.touch : HANDLE_HIT_R.mouse} />
-            <circle className="bp-handle-dot" cx={h.x} cy={h.y} r={HANDLE_DOT_R} stroke={p.stroke} />
+            <rect className="bp-handle-dot" x={h.x - HANDLE_DOT_R} y={h.y - HANDLE_DOT_R} width={HANDLE_DOT_R * 2} height={HANDLE_DOT_R * 2} />
           </g>
         );
       })}
       {grip && (
         <g className="bp-grip" transform={`translate(${centre.x} ${centre.y})`}>
           <circle className="bp-grip-hit" r={coarse ? GRIP_HIT_R.touch : GRIP_HIT_R.mouse} />
-          <circle className="bp-grip-chip" r={GRIP_R} fill={p.stroke} />
+          <rect className="bp-grip-chip" x={-GRIP_HALF} y={-GRIP_HALF} width={GRIP_HALF * 2} height={GRIP_HALF * 2} />
           <path className="bp-grip-glyph" d={GRIP_GLYPH} />
         </g>
       )}

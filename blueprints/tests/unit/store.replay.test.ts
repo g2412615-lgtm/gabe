@@ -185,7 +185,7 @@ describe("an outbox entry the server already has is never replayed", () => {
     server.edit("circle", id, { x: 0.9 }); // …then the desktop moved it
     storage.setItem(
       outboxKey(server.planId),
-      JSON.stringify({ v: 1, entries: { [`circle:${id}`]: { local: { ...row, x: 0.6 }, base: { x: 0.2, y: 0.2, r: 0.05, color: "amber", title: "", deletedAt: null } } } }),
+      JSON.stringify({ v: 1, entries: { [`circle:${id}`]: { local: { ...row, x: 0.6 }, base: { x: 0.2, y: 0.2, r: 0.05, color: "gold", title: "", deletedAt: null } } } }),
     );
     const again = await open(server, storage);
     await tick(DEBOUNCE_MS * 4);
@@ -317,5 +317,59 @@ describe("stores sharing one plan's outbox", () => {
     await settle();
     d.store.dispose();
     expect(storage.writes).toBe(writes);
+  });
+});
+
+describe("an outbox saved by the app before the rebrand (amber, purple)", () => {
+  /** The stored outbox as the previous version wrote it: gold was "amber", black was "purple". */
+  function makeLegacy(storage: MemoryStorage, planId: string) {
+    const key = outboxKey(planId);
+    storage.setItem(key, storage.getItem(key)!.replace(/"gold"/g, '"amber"').replace(/"black"/g, '"purple"'));
+    return key;
+  }
+
+  it("restores the colours meant: a purple circle moved offline lands as black, moved", async () => {
+    const server = new FakeServer();
+    const storage = new MemoryStorage();
+    const ipad = await openMortal(server, storage);
+    const id = await savedCircle(ipad);
+    ipad.store.updateCircle(id, { color: "black" });
+    await ipad.store.flushNow();
+    ipad.env.connected = false;
+    ipad.net.failWith = 0;
+    ipad.store.updateCircle(id, { x: 0.6 });
+    await ipad.store.flushNow();
+    // (the tab is killed; the app is updated)
+    const key = makeLegacy(storage, server.planId);
+    expect(storage.getItem(key)).toContain('"purple"');
+
+    const again = await open(server, storage);
+    await tick(DEBOUNCE_MS * 4);
+    expect(server.circles.get(id)).toMatchObject({ x: 0.6, color: "black" });
+    expect(again.store.getState().circleById.get(id)).toMatchObject({ x: 0.6, color: "black" });
+    expect(storage.data.has(key)).toBe(false);
+  });
+
+  it("an unsent recolour to purple saves as black; an amber circle only moved here keeps the other device's recolour", async () => {
+    const server = new FakeServer();
+    const storage = new MemoryStorage();
+    const ipad = await openMortal(server, storage);
+    const recoloured = await savedCircle(ipad, 0.2);
+    const moved = await savedCircle(ipad, 0.4);
+    ipad.env.connected = false;
+    ipad.net.failWith = 0;
+    ipad.store.updateCircle(recoloured, { color: "black" });
+    ipad.store.updateCircle(moved, { x: 0.7 });
+    await ipad.store.flushNow();
+    const key = makeLegacy(storage, server.planId);
+    expect(storage.getItem(key)).toContain('"amber"');
+
+    await elsewhere(server, (desk) => desk.store.updateCircle(moved, { color: "red" }));
+    const again = await open(server, storage);
+    await tick(DEBOUNCE_MS * 4);
+    expect(server.circles.get(recoloured)).toMatchObject({ color: "black" });
+    expect(server.circles.get(moved)).toMatchObject({ x: 0.7, color: "red" });
+    expect(again.store.getState().circleById.get(moved)).toMatchObject({ x: 0.7, color: "red" });
+    expect(storage.data.has(key)).toBe(false);
   });
 });

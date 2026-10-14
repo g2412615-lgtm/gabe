@@ -12,7 +12,7 @@ const circle = (over: Partial<CircleRow> = {}): CircleRow => ({
   x: 0.2,
   y: 0.3,
   r: 0.05,
-  color: "amber",
+  color: "gold",
   title: "",
   num: 4,
   createdAt: 1000,
@@ -68,7 +68,7 @@ describe("merge3", () => {
 
 describe("editableOf / sameEditable / sameValue", () => {
   it("picks only the editable fields, with null for missing ones", () => {
-    expect(editableOf("circle", circle())).toEqual({ x: 0.2, y: 0.3, r: 0.05, color: "amber", title: "", deletedAt: null });
+    expect(editableOf("circle", circle())).toEqual({ x: 0.2, y: 0.3, r: 0.05, color: "gold", title: "", deletedAt: null });
     expect(editableOf("comment", { body: "x" })).toEqual({ body: "x", deletedAt: null });
   });
 

@@ -1,6 +1,6 @@
-// The editor's top bar (DeployMap's .editor-header):
+// The editor's top bar: the Kilowatt Events gold band (docs/BRAND.md).
 //
-//   ← Plans | plan name | ☰ ‹ Page 2 of 6 · "A-101 Seating bowl" › … [Move|Circle] [↶|↷] (Saved) (?)
+//   logo ← Plans ┃ plan name  ☰ ‹ Page 2 of 6 · "A-101 Seating bowl" › … [Move|Circle] [↶|↷] (Saved) (?)
 //
 // Below 1100 px the button labels give way to icons (names stay in
 // aria-label/title); on narrow screens the bar wraps to two rows.
@@ -8,13 +8,13 @@
 import { memo } from "react";
 import { MAX_PLAN_NAME_CHARS } from "../../shared/constants";
 import type { PageRow, PlanRow } from "../../shared/types";
-import { Link } from "../router";
 import InlineRename from "../ui/InlineRename";
 import SaveStatus from "../ui/SaveStatus";
-import { IconArrowLeft, IconChevron, IconChevronLeft, IconCircle, IconHand, IconRedo, IconSidebar, IconUndo } from "../ui/icons";
+import { IconChevron, IconChevronLeft, IconCircle, IconHand, IconRedo, IconSidebar, IconUndo } from "../ui/icons";
 import type { SaveInfo } from "../sync";
 import type { CanvasMode } from "./canvas/BlueprintCanvas";
 import { isMac } from "./format";
+import HeaderHome from "./HeaderHome";
 import HelpMenu from "./HelpMenu";
 
 export interface EditorHeaderProps {
@@ -44,10 +44,7 @@ function EditorHeader(p: EditorHeaderProps) {
 
   return (
     <header className="ed-header">
-      <Link to="/" className="ed-back" title="Back to event plans">
-        <IconArrowLeft size={15} />
-        <span className="ed-back-lbl">Plans</span>
-      </Link>
+      <HeaderHome />
 
       <div className="ed-title">
         {p.plan && (

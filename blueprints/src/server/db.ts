@@ -105,6 +105,15 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE pages ADD COLUMN render_attempts INTEGER NOT NULL DEFAULT 0;
   `,
+  // 3 — circle colours moved to the Kilowatt Events palette: amber → gold,
+  // purple → black (red, blue and green keep their names). A renamed circle
+  // gets a new rev, as any change does, so every older copy of it counts as
+  // older; updated_at is left alone (nobody edited it). Changes still
+  // carrying the old names are mapped on the way in (LEGACY_CIRCLE_COLORS).
+  `
+  UPDATE circles SET color = 'gold', rev = rev + 1 WHERE color = 'amber';
+  UPDATE circles SET color = 'black', rev = rev + 1 WHERE color = 'purple';
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

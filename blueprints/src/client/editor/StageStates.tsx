@@ -9,7 +9,8 @@ import Dropzone from "../ui/Dropzone";
 import EmptyArt from "../ui/EmptyArt";
 import Progress from "../ui/Progress";
 import Spinner from "../ui/Spinner";
-import { IconAlert, IconArrowLeft, IconRefresh } from "../ui/icons";
+import { IconAlert, IconRefresh } from "../ui/icons";
+import HeaderHome from "./HeaderHome";
 import type { AddPages } from "./useAddPages";
 
 export function PreparingCard({ page }: { page: PageRow }) {
@@ -66,10 +67,7 @@ export function EditorMessage({ title, children, busy, action }: { title: string
   return (
     <div className="ed-root ed-message-root">
       <header className="ed-header">
-        <Link to="/" className="ed-back" title="Back to event plans">
-          <IconArrowLeft size={15} />
-          <span className="ed-back-lbl">Plans</span>
-        </Link>
+        <HeaderHome />
       </header>
       <main className="ed-message">
         <div className="ed-card" role={busy ? "status" : "alert"}>
@@ -93,11 +91,10 @@ export function EditorLoading() {
   return (
     <div className="ed-root">
       <header className="ed-header">
-        <Link to="/" className="ed-back" title="Back to event plans">
-          <IconArrowLeft size={15} />
-          <span className="ed-back-lbl">Plans</span>
-        </Link>
-        <span className="ed-title-skel skeleton" aria-hidden="true" />
+        <HeaderHome />
+        <span className="ed-title">
+          <span className="ed-title-skel skeleton" aria-hidden="true" />
+        </span>
       </header>
       <main className="ed-message">
         <div className="ed-loading" role="status">
