@@ -13,7 +13,7 @@
 import { memo, useState } from "react";
 import { assetUrl } from "../api";
 import { MAX_LABEL_CHARS } from "../../shared/constants";
-import type { CircleRow, PageRow } from "../../shared/types";
+import type { CircleColor, CircleRow, PageRow } from "../../shared/types";
 import { confirmDialog } from "../ui/Dialog";
 import Dropzone from "../ui/Dropzone";
 import InlineRename from "../ui/InlineRename";
@@ -50,6 +50,9 @@ export interface PageSidebarProps {
   onCopyCircles(pageId: string): void;
   /** Open the Duplicate page dialog. */
   onDuplicatePage(pageId: string): void;
+  /** Circle colours hidden on this device: the Notes list leaves them out too. */
+  hiddenColors: ReadonlySet<CircleColor>;
+  onShowAllColors(): void;
   uploads: AddPages;
 }
 
@@ -159,7 +162,15 @@ function PageSidebar(p: PageSidebarProps) {
             {pages.length === 0 && <p className="ps-none">No pages yet. Add a blueprint below.</p>}
           </>
         ) : (
-          <NotesList store={p.store} currentPageId={p.currentPageId} selectedId={p.selectedId} onLit={p.onLit} onOpen={p.onOpenCircle} />
+          <NotesList
+            store={p.store}
+            currentPageId={p.currentPageId}
+            selectedId={p.selectedId}
+            onLit={p.onLit}
+            onOpen={p.onOpenCircle}
+            hiddenColors={p.hiddenColors}
+            onShowAllColors={p.onShowAllColors}
+          />
         )}
       </div>
 

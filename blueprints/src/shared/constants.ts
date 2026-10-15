@@ -1,4 +1,4 @@
-import type { CircleColor } from "./types";
+import type { CircleColor, PlanRow } from "./types";
 
 /** What the app calls itself (tab titles, home-screen name). */
 export const APP_NAME = "KWE Blueprints";
@@ -52,6 +52,22 @@ export function circleColorOf(v: unknown): CircleColor | undefined {
   if (Object.prototype.hasOwnProperty.call(CIRCLE_COLORS, v)) return v as CircleColor;
   return LEGACY_CIRCLE_COLORS.get(v);
 }
+
+/**
+ * Each colour's label ("what this colour means") is a field of the event
+ * plan, so it's shared by every device working on the plan and saved like
+ * any other edit. A colour with an empty label isn't assigned yet.
+ */
+export const LEGEND_FIELD = {
+  gold: "legendGold",
+  black: "legendBlack",
+  red: "legendRed",
+  blue: "legendBlue",
+  green: "legendGreen",
+} as const satisfies Record<CircleColor, keyof PlanRow>;
+/** What a new event plan's colours mean until the owner says otherwise (existing plans got the same in schema migration 4). */
+export const DEFAULT_LEGEND: Readonly<Record<CircleColor, string>> = { gold: "", black: "", red: "", blue: "", green: "General notes" };
+export const MAX_LEGEND_CHARS = 60;
 
 /** Circle radius limits, as a fraction of the page's long side. */
 export const MIN_CIRCLE_R = 0.0015;

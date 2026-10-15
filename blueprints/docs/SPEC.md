@@ -69,7 +69,7 @@ Imports: relative paths (`../../shared/types`). No path aliases.
 
 See `src/shared/types.ts` (authoritative). Summary:
 
-- **Plan** (an "event plan"): `name`. Home page lists plans.
+- **Plan** (an "event plan"): `name`, and a label per circle colour — `legendGold`, `legendBlack`, `legendRed`, `legendBlue`, `legendGreen` ("what this colour means"; "" = not assigned; a new plan starts with green = "General notes", `DEFAULT_LEGEND`). Labels are one line, at most 60 characters, not trimmed (they're saved as they're typed), cleaned alike on both sides (`cleanLegend` in `shared/labels.ts`). Home page lists plans.
 - **Source**: an uploaded file (PDF or PNG/JPEG), kept verbatim on disk.
 - **Page**: one page of a source, in a plan. Owner-editable `label` and `sortOrder`. Server-owned render fields (`status`, sizes, tiles, `assetKey`).
 - **Circle**: on a page. `x`,`y` = centre as fractions of page width/height; `r` = radius as a fraction of the page's **long side**; `color` (a `CIRCLE_COLORS` key: `gold` (default), `black`, `red`, `blue`, `green`); optional `title`; server-assigned per-plan `num` (1, 2, 3… never reused; 0 until first save).
@@ -82,6 +82,15 @@ deleted. Undoing a page delete brings its circles back.
 
 IDs: client-generated UUIDs for circles and comments (`newId()` in api.ts);
 server-generated UUIDs for plans, sources, pages.
+
+Schema migrations (`src/server/db.ts`) only ever add: none deletes or rewrites
+the owner's pages, circles or comments (migration 3 renamed two colours,
+migration 4 added the colour label columns with their defaults, leaving every
+existing row's `rev` and `updatedAt` alone). Before migrating an existing
+database the server writes a full copy, `backups/app-before-schema-<n>-from-<m>-<stamp>.db`,
+kept for good. An outbox entry written before a field existed restores
+without it (`normalizeRow` never invents fields; `restoreRow` leaves absent
+fields to the server), so an older device's waiting change can't blank a newer field.
 
 ## 3. HTTP API (server)
 
@@ -425,6 +434,9 @@ div.ed-body
   - All the copies, on every page, are one `store.pasteCircles` call: one undo step, one save. Toast "Copied 3 circles to “P-1”." with "Show" (opens that page; not when it's the open page — and the toast is dismissed when the editor closes, since Show would have nowhere to go), or "Copied 3 circles to 2 pages.".
   - If the From page is deleted (on the other device) while the dialog is open, it carries on from the first page that has circles (closes when no page is left).
   - ⌘C / Ctrl+C with a circle selected (and no text selected on the page) copies it with its comments to an in-memory clipboard for this plan (toast "Circle #4 copied. Open another page and press ⌘V to paste it."); ⌘V / Ctrl+V pastes onto the open page (if it's showing; a page still being prepared says "paste once it shows", a failed one "press Try again, then paste"), selects the copy and reveals it.
+- **Colors** (`ColorsMenu.tsx`, in the header between the modes and undo/redo): a button showing the five colours (hidden ones hollow; "N hidden" on black while any are). Its panel: per colour a "Show" checkbox, the colour, its label field (saved as typed: `store.setColorLabel`, one undo step per label; Enter finishes, Escape puts the label back), the number of circles of that colour on this page, and "Only"; "Show all" at the top; a note that labels are saved with the plan while showing/hiding is this device's view.
+  - Hidden colours (`colorFilter.ts`): per plan, per device (localStorage `bpn-hidden-colors:<planId>`), never saved to the server. Their circles aren't drawn or hit-tested (the selected circle always is; hiding its colour deselects it) and aren't listed in Notes ("N circles aren't listed: their colors are hidden. Show all colors"). While any are hidden a black chip at the stage's top left says "N circles hidden" (or "N colors hidden") with "Show all". Making or recolouring a circle in a hidden colour (Circle mode, a swatch, ⌘V) shows that colour again, with a toast.
+  - Labels show in a circle's panel under the swatches ("Red Security") and in the swatches' and Notes dots' names.
 - **Gestures from the canvas**: `onGesture` start → `store.beginGesture()`; update → `store.updateCircle(id, {x,y}|{r}, { live: true })`; end → `store.endGesture()`; cancel → `store.cancelGesture()`.
 - **Keyboard** (ignored while typing in inputs/textareas/contenteditable, except ⌘S): `V` move, `C` circle mode, `Esc` cascade (cancel add mode → close the comment editor → deselect → close the left drawer), `Delete`/`Backspace` delete the selected circle (toast with Undo), `⌘Z`/`Ctrl+Z` undo, `⌘⇧Z`/`Ctrl+Y` redo, `⌘S`/`Ctrl+S` flush (preventDefault), `+`/`=` zoom in, `-` zoom out, `0` fit, `[`/`PageUp` previous page, `]`/`PageDown` next page, `F` focus the selected circle, `⌘C`/`Ctrl+C` copy the selected circle, `⌘V`/`Ctrl+V` paste copied circles onto the open page.
 - **URL**: keep `?page=<id>` (and `&circle=<id>` when one is selected) in sync with `replaceQuery`; honour `initialPageId`/`initialCircleId` on load (focus that circle).

@@ -36,7 +36,7 @@
 //    everything and resumes once the session is back; nothing is dropped
 //    except a change the server explicitly refused (and the owner is told).
 
-import { DEFAULT_CIRCLE_COLOR, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MAX_TITLE_CHARS, MIN_CIRCLE_R } from "../../shared/constants";
+import { DEFAULT_CIRCLE_COLOR, LEGEND_FIELD, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MAX_TITLE_CHARS, MIN_CIRCLE_R } from "../../shared/constants";
 import { editableOf, merge3, sameEditable, sameValue } from "../../shared/merge";
 import {
   CREATE_FIELDS,
@@ -1382,6 +1382,11 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
     renamePlan(name) {
       if (!loaded) return;
       batch(() => commit([patchRow("plan", planId, { name })], "plan-name")); // typing the name is one undo step
+    },
+
+    setColorLabel(color, label) {
+      if (!loaded || !isColor(color)) return;
+      batch(() => commit([patchRow("plan", planId, { [LEGEND_FIELD[color]]: label })], `legend:${color}`)); // typing a label is one undo step
     },
 
     mergePages(pages) {

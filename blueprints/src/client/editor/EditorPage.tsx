@@ -8,7 +8,8 @@
 // The plan store is the single source of truth for the plan's rows and
 // autosaves every change; this component holds only view state: which page
 // is open, which circle is selected or hovered, the tool, the sidebar, the
-// Copy circles and Duplicate page dialogs.
+// Copy circles and Duplicate page dialogs, and which circle colours this
+// device hides (colorFilter.ts).
 //
 // The comments panel follows the pointer on a desktop: it shows a hovered
 // circle (unless the owner is typing in the panel) and falls back to the
@@ -20,9 +21,9 @@
 // starts showing it.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
-import { APP_NAME } from "../../shared/constants";
+import { APP_NAME, CIRCLE_COLORS, CIRCLE_COLOR_ORDER, DEFAULT_CIRCLE_COLOR } from "../../shared/constants";
 import type { View } from "../../shared/geometry";
-import type { CircleRow, PageRow } from "../../shared/types";
+import type { CircleColor, CircleRow, PageRow } from "../../shared/types";
 import { addLeaveGuard, goToLogin, replaceQuery } from "../router";
 import { dismissToast, notify, setToastOffset } from "../ui/notify";
 import { useMediaQuery } from "../ui/media";
@@ -30,7 +31,9 @@ import { createPlanStore, usePlanState } from "../sync";
 import BlueprintCanvas, { type CanvasGestureEvent, type CanvasHandle, type CanvasMode } from "./canvas/BlueprintCanvas";
 import { deleteCircleWithUndo, registerEditorStore, retryPage } from "./actions";
 import CommentsPanel, { type TypingField } from "./CommentsPanel";
+import { readHiddenColors, visibleCircles, writeHiddenColors } from "./colorFilter";
 import { circleClipFor, copyOf, placeCopies, setCircleClip } from "./copyCircles";
+import { paperSwatch } from "./swatch";
 import CopyCirclesDialog, { type CopyRequest } from "./CopyCirclesDialog";
 import DuplicatePageDialog from "./DuplicatePageDialog";
 import EditorHeader from "./EditorHeader";
@@ -129,6 +132,41 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
     setTyping((t) => (t[field] === on ? t : { ...t, [field]: on }));
   }, []);
 
+  // ── circle colours hidden on this device (the Colors menu) ───────────
+  const [hiddenColors, setHiddenState] = useState<ReadonlySet<CircleColor>>(() => readHiddenColors(planId));
+  const hiddenRef = useRef(hiddenColors);
+  hiddenRef.current = hiddenColors;
+  const setHiddenColors = useCallback(
+    (next: ReadonlySet<CircleColor>) => {
+      setHiddenState(next);
+      writeHiddenColors(planId, next);
+      // the selected circle's colour went: put it away with the others
+      const st = store.getState();
+      const sel = selectedRef.current ? st.circleById.get(selectedRef.current) : undefined;
+      if (sel && next.has(sel.color)) {
+        tentativePin.current = null;
+        setSelectedId(null);
+      }
+      setHoverId(null);
+    },
+    [planId, store],
+  );
+  const showAllColors = useCallback(() => setHiddenColors(new Set()), [setHiddenColors]);
+  /** A circle was just made or recoloured in a colour this device hides: show that colour again (and say so). */
+  const revealColors = useCallback(
+    (colors: Iterable<CircleColor>) => {
+      const back = [...new Set(colors)].filter((c) => hiddenRef.current.has(c));
+      if (!back.length) return;
+      const next = new Set(hiddenRef.current);
+      for (const c of back) next.delete(c);
+      setHiddenState(next);
+      writeHiddenColors(planId, next);
+      const names = back.map((c) => CIRCLE_COLORS[c].label.toLowerCase()).join(" and ");
+      notify(`Showing ${names} circles again.`, "info");
+    },
+    [planId],
+  );
+
   const canvasRef = useRef<CanvasHandle>(null);
   const [stageEl, setStageEl] = useState<HTMLElement | null>(null);
   const stageSize = useElementSize(stageEl);
@@ -146,6 +184,10 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
 
   const page = (pageId && pageById.get(pageId)) || null;
   const pageIndex = page ? pages.indexOf(page) : -1;
+  const pageCircles = (page && circlesByPage.get(page.id)) || NO_CIRCLES;
+  const shownCircles = useMemo(() => visibleCircles(pageCircles, hiddenColors, selectedId), [pageCircles, hiddenColors, selectedId]);
+  const hiddenHere = pageCircles.length - shownCircles.length;
+  const revealOneColor = useCallback((c: CircleColor) => revealColors([c]), [revealColors]);
 
   // ── first load: the page and circle from the URL ─────────────────────
   useEffect(() => {
@@ -272,6 +314,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
       const pid = pageIdRef.current;
       if (!pid) return;
       const id = store.addCircle({ pageId: pid, x: c.x, y: c.y, r: c.r });
+      revealColors([DEFAULT_CIRCLE_COLOR]);
       tentativePin.current = null;
       setSelectedId(id);
       setHoverId(null);
@@ -281,7 +324,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
       // with a mouse the keyboard is right there: start the first comment
       if (lastPointer.current === "mouse") composerFocusFor.current = id;
     },
-    [store],
+    [store, revealColors],
   );
 
   const onGesture = useCallback(
@@ -538,6 +581,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
       }
       const ids = store.pasteCircles(placeCopies(clip.items, target, st.circlesByPage.get(target.id) ?? NO_CIRCLES));
       if (!ids.length) return true;
+      revealColors(clip.items.map((it) => it.color));
       // the copy is selected, in view, and ready to drag into place
       tentativePin.current = null;
       setSelectedId(ids[0]);
@@ -599,7 +643,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
         key={page.id}
         ref={canvasRef}
         page={page}
-        circles={circlesByPage.get(page.id) ?? NO_CIRCLES}
+        circles={shownCircles}
         selectedId={selectedId}
         litId={litId}
         mode={mode}
@@ -618,6 +662,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   return (
     <div className={`ed-root${sheet ? " is-sheet" : ""}`}>
       <EditorHeader
+        store={store}
         plan={plan}
         pages={pages}
         pageIndex={pageIndex}
@@ -634,6 +679,8 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
         onUndo={onUndo}
         onRedo={onRedo}
         onSaveNow={onSaveNow}
+        hiddenColors={hiddenColors}
+        onHiddenColorsChange={setHiddenColors}
       />
 
       {save.state === "signedOut" && (
@@ -663,6 +710,8 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
           onLit={setNotesLit}
           onCopyCircles={copyPageCircles}
           onDuplicatePage={duplicatePage}
+          hiddenColors={hiddenColors}
+          onShowAllColors={showAllColors}
           uploads={uploads}
         />
         {narrow && <div className={`ed-scrim${drawerOpen ? " on" : ""}`} onClick={() => setDrawerOpen(false)} aria-hidden="true" />}
@@ -675,6 +724,24 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
           }}
         >
           {stage}
+
+          {hiddenColors.size > 0 && viewable(page) && (
+            <div className="ed-filter-chip" role="status">
+              <span className="ed-filter-dots" aria-hidden="true">
+                {CIRCLE_COLOR_ORDER.filter((c) => hiddenColors.has(c)).map((c) => (
+                  <span key={c} className="nl-dot" style={paperSwatch(CIRCLE_COLORS[c])} />
+                ))}
+              </span>
+              <span>
+                {hiddenHere === 0
+                  ? `${hiddenColors.size === 1 ? "1 color" : `${hiddenColors.size} colors`} hidden`
+                  : `${hiddenHere === 1 ? "1 circle" : `${hiddenHere} circles`} hidden`}
+              </span>
+              <button type="button" className="ghost small" onClick={showAllColors}>
+                Show all
+              </button>
+            </div>
+          )}
 
           <aside
             className={`ed-right${panelOpen ? " open" : ""}${sheet ? " sheet" : ""}`}
@@ -699,6 +766,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
                 takeComposerFocus={takeComposerFocus}
                 editorAlive={editorAlive}
                 onCopy={pages.length > 1 ? copyCircle : undefined}
+                onColorPicked={revealOneColor}
               />
             )}
           </aside>

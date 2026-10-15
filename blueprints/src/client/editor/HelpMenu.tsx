@@ -43,6 +43,7 @@ export default function HelpMenu() {
         <Row k="Drag a dot">Resize the selected circle</Row>
         <Row k="Drag the ✥ in its middle">Move the selected circle</Row>
         <Row k="⋯ beside a page">Duplicate it, or copy its circles to another page</Row>
+        <Row k="Colors (top bar)">Name what each color means; show or hide colors</Row>
       </dl>
     </section>
   );
@@ -59,6 +60,7 @@ export default function HelpMenu() {
         <Row k="Drag a dot">Resize the selected circle</Row>
         <Row k="Drag the ✥">Move the selected circle</Row>
         <Row k="⋯ beside a page">Duplicate it, or copy its circles to another page</Row>
+        <Row k="Colors (top bar)">Name what each color means; show or hide colors</Row>
       </dl>
     </section>
   );

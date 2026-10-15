@@ -3,7 +3,18 @@
 // network that can go offline / sign out / hold requests / lose replies, an
 // in-memory localStorage and a page-lifecycle environment the tests drive.
 
-import { circleColorOf, DEFAULT_CIRCLE_COLOR, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MAX_LABEL_CHARS, MAX_PLAN_NAME_CHARS, MAX_TITLE_CHARS, MIN_CIRCLE_R } from "../../src/shared/constants";
+import {
+  circleColorOf,
+  DEFAULT_CIRCLE_COLOR,
+  DEFAULT_LEGEND,
+  MAX_CIRCLE_R,
+  MAX_COMMENT_CHARS,
+  MAX_LABEL_CHARS,
+  MAX_PLAN_NAME_CHARS,
+  MAX_TITLE_CHARS,
+  MIN_CIRCLE_R,
+} from "../../src/shared/constants";
+import { cleanLegend } from "../../src/shared/labels";
 import { sameValue } from "../../src/shared/merge";
 import {
   EDITABLE,
@@ -31,6 +42,15 @@ const strip = (s: string) => s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\
 const cleanName = (v: unknown, max: number) => (typeof v === "string" ? strip(v).replace(/\s+/g, " ").trim().slice(0, max).trim() : "");
 
 let idSeq = 0;
+/** A plan's colour labels as the server starts them. */
+const LEGEND_DEFAULTS = {
+  legendGold: DEFAULT_LEGEND.gold,
+  legendBlack: DEFAULT_LEGEND.black,
+  legendRed: DEFAULT_LEGEND.red,
+  legendBlue: DEFAULT_LEGEND.blue,
+  legendGreen: DEFAULT_LEGEND.green,
+};
+
 export const testId = (prefix = "id") => `${prefix}-${(++idSeq).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 /** An in-memory copy of one plan on "the server", with the sync endpoint's rules. */
@@ -47,7 +67,15 @@ export class FakeServer {
   constructor(opts: { pages?: number; name?: string } = {}) {
     const t = Date.now();
     this.planId = testId("plan");
-    this.plan = { id: this.planId, name: opts.name ?? "Millrace Stadium — home opener", createdAt: t, updatedAt: t, deletedAt: null, rev: 1 };
+    this.plan = {
+      id: this.planId,
+      name: opts.name ?? "Millrace Stadium — home opener",
+      ...LEGEND_DEFAULTS,
+      createdAt: t,
+      updatedAt: t,
+      deletedAt: null,
+      rev: 1,
+    };
     for (let i = 0; i < (opts.pages ?? 2); i++) this.addPage(`Page ${i + 1}`);
   }
 
@@ -128,6 +156,12 @@ export class FakeServer {
         return cleanName(v, MAX_LABEL_CHARS) || undefined;
       case "name":
         return cleanName(v, MAX_PLAN_NAME_CHARS) || undefined;
+      case "legendGold":
+      case "legendBlack":
+      case "legendRed":
+      case "legendBlue":
+      case "legendGreen":
+        return cleanLegend(v) ?? undefined;
     }
     return undefined;
   }

@@ -96,6 +96,7 @@ Then press **Retry** on any page that couldn't be prepared.
 ## Backups
 
 - **Daily snapshots:** the app keeps a snapshot of its database once a day, the newest 14, on its storage. Fly also snapshots the whole storage volume daily.
+- **Before an update changes the database:** when a new version needs to add something to the database, it first saves a full copy of it as it was (`backups/app-before-schema-…db`), kept for good. Updates only ever add; they never delete or change your pages, circles or comments.
 - **Off-site copy to Cloudflare R2 (optional):** this is the same setup DeployMap uses.
   1. Create an R2 API token with "Object Read & Write" on your bucket.
   2. On a computer with the Fly command line installed, run:

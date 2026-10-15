@@ -25,6 +25,12 @@ export type PageStatus = "queued" | "rendering" | "preview" | "ready" | "failed"
 export interface PlanRow {
   id: ID;
   name: string;
+  /** What each circle colour means in this plan ("" = not assigned yet). See LEGEND_FIELD. */
+  legendGold: string;
+  legendBlack: string;
+  legendRed: string;
+  legendBlue: string;
+  legendGreen: string;
   createdAt: Millis;
   updatedAt: Millis;
   deletedAt: Millis | null;
@@ -124,7 +130,7 @@ export interface RowByKind {
  * `deletedAt` is editable so that delete and undo-delete travel the same way.
  */
 export const EDITABLE: { [K in EntityKind]: readonly (keyof RowByKind[K])[] } = {
-  plan: ["name", "deletedAt"],
+  plan: ["name", "legendGold", "legendBlack", "legendRed", "legendBlue", "legendGreen", "deletedAt"],
   page: ["label", "sortOrder", "deletedAt"],
   circle: ["x", "y", "r", "color", "title", "deletedAt"],
   comment: ["body", "deletedAt"],

@@ -255,6 +255,164 @@
   }
 }
 
+/* the Colors button: the five colours as the key; hidden ones hollow. While
+   something is hidden it says so, black on the gold. */
+.ed-header button.ed-colors-btn {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid #000;
+  font-size: 13px;
+  font-weight: 700;
+}
+.ed-header button.ed-colors-btn.filtering {
+  background: #000;
+  color: var(--kw-gold);
+}
+.cm-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+/* circles stay round: the colour as it's drawn on the paper */
+.cm-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid;
+  box-shadow: 0 0 0 1px #fff;
+}
+.cm-dot.off {
+  background: transparent !important;
+  border-color: currentColor !important;
+  opacity: 0.45;
+  box-shadow: none;
+}
+.cm-badge {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* the Colors panel */
+.hmenu-pop.cm-pop {
+  width: 380px;
+  max-width: calc(100vw - 16px);
+}
+.cm {
+  padding: 4px 14px 10px;
+}
+.cm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 34px;
+}
+.cm-title {
+  margin: 0;
+  font-family: var(--font-head);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+  color: var(--text);
+}
+.cm-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  border-top: 2px solid var(--rule-strong);
+}
+.cm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  border-bottom: 1px solid var(--border);
+}
+.cm-row .cm-show {
+  flex: none;
+  margin: 0;
+}
+.cm-row .nl-dot {
+  flex: none;
+}
+.cm-name {
+  flex: none;
+  width: 42px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text);
+}
+/* hidden: the row fades (its label can still be edited) */
+.cm-row.off .nl-dot,
+.cm-row.off .cm-name,
+.cm-row.off .cm-count {
+  opacity: 0.45;
+}
+input.cm-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  font-size: var(--fs-sm);
+}
+.cm-count {
+  flex: none;
+  min-width: 18px;
+  text-align: right;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+button.cm-only {
+  flex: none;
+  padding: 0 6px;
+  font-size: var(--fs-xs);
+}
+.cm-note {
+  margin: 10px 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+/* over the blueprint while colours are hidden: so nothing looks lost */
+.ed-filter-chip {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 4px 0 10px;
+  background: #000;
+  color: var(--kw-gold);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  box-shadow: var(--shadow-2);
+}
+.ed-filter-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.ed-filter-chip button.ghost {
+  color: var(--kw-gold);
+  border-color: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (hover: hover) {
+  .ed-filter-chip button.ghost:hover:not(:disabled) {
+    background: var(--kw-gold);
+    color: #000;
+  }
+}
+
 /* save status: a small square tag. Saved / saving: black on the gold;
    offline: a black chip with gold text; not saved / signed out: red, white text */
 .ed-header .save-status {
@@ -876,6 +1034,31 @@ button.nl-row.active {
 .nl-count svg {
   color: var(--muted);
 }
+.nl-hidden {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  background: var(--accent-soft);
+  border-left: 6px solid var(--kw-gold);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--text-2);
+}
+button.link-btn {
+  display: inline;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--kw-gold);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
 .nl-empty {
   padding: 24px 16px;
   text-align: center;
@@ -1346,6 +1529,17 @@ textarea.cp-input {
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
+/* what the circle's colour means in this plan (the Colors key) */
+.cp-legend {
+  margin: 8px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.cp-legend-color {
+  font-weight: 700;
+  color: var(--text);
+}
+
 /* Copy to another page on the left, Delete circle on the right */
 .cp-foot {
   flex: none;
@@ -1660,6 +1854,26 @@ button.cp-delete {
   }
   .cc-row,
   .cc-check {
+    min-height: var(--hit);
+  }
+  .ed-header button.ed-colors-btn {
+    height: var(--hit);
+  }
+  .cm-row {
+    min-height: 52px;
+  }
+  .cm-row .cm-show {
+    width: 22px;
+    height: 22px;
+  }
+  input.cm-label {
+    height: 40px;
+    font-size: 16px;
+  }
+  button.cm-only {
+    min-height: var(--hit);
+  }
+  .ed-filter-chip {
     min-height: var(--hit);
   }
   button.cp-swatch {

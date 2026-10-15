@@ -4,6 +4,7 @@
 // the text jump or a circle hop.
 
 import { CIRCLE_COLORS, circleColorOf, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MAX_LABEL_CHARS, MAX_PLAN_NAME_CHARS, MAX_TITLE_CHARS, MIN_CIRCLE_R } from "../../shared/constants";
+import { cleanLegend } from "../../shared/labels";
 import { EDITABLE, type CircleColor, type EntityKind } from "../../shared/types";
 
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -81,6 +82,15 @@ export function cleanPatch(kind: EntityKind, patch: Record<string, unknown>): Re
       case "sortOrder":
         if (isFiniteNumber(v)) out[f] = v;
         break;
+      case "legendGold":
+      case "legendBlack":
+      case "legendRed":
+      case "legendBlue":
+      case "legendGreen": {
+        const s = cleanLegend(v); // "" is a label too: not assigned
+        if (s !== null) out[f] = s;
+        break;
+      }
       case "deletedAt":
         if (v === null || isFiniteNumber(v)) out[f] = v;
         break;

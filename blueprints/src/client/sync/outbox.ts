@@ -25,7 +25,7 @@
 // Every storage access may throw (private mode, a full quota, blocked
 // storage): the editor works without it, it just can't survive a reload.
 
-import { DEFAULT_CIRCLE_COLOR, MAX_CIRCLE_R, MIN_CIRCLE_R } from "../../shared/constants";
+import { DEFAULT_CIRCLE_COLOR, LEGEND_FIELD, MAX_CIRCLE_R, MIN_CIRCLE_R } from "../../shared/constants";
 import { editableOf, sameValue } from "../../shared/merge";
 import { EDITABLE, type CircleRow, type CommentRow, type EntityKind, type PageRow, type PlanRow, type RowByKind } from "../../shared/types";
 import { clamp, isColor, isFiniteNumber, toColor } from "./clean";
@@ -83,7 +83,11 @@ export function normalizeRow(kind: EntityKind, id: string, planId: string, raw: 
   const common = { id, planId, createdAt: num(raw.createdAt, 0), updatedAt: num(raw.updatedAt, 0), deletedAt: tomb(raw.deletedAt), rev: num(raw.rev, 0) };
   switch (kind) {
     case "plan": {
-      const row: PlanRow = { id, name: str(raw.name), createdAt: common.createdAt, updatedAt: common.updatedAt, deletedAt: common.deletedAt, rev: common.rev };
+      const row = { id, name: str(raw.name), createdAt: common.createdAt, updatedAt: common.updatedAt, deletedAt: common.deletedAt, rev: common.rev } as PlanRow;
+      // Colour labels only when the entry has them: an entry written before
+      // they existed must not blank the plan's labels (restoreRow leaves
+      // fields the entry doesn't have to the server).
+      for (const f of Object.values(LEGEND_FIELD)) if (typeof raw[f] === "string") (row as unknown as Record<string, unknown>)[f] = raw[f];
       return row;
     }
     case "page": {
