@@ -216,6 +216,12 @@ export default function Menu({
       case "Tab": {
         // Tab moves through a panel's own links/buttons; leaving them closes the menu.
         const stops = focusableIn(e.currentTarget);
+        // opened by pointer, the pop-up itself has focus: Tab goes into the panel, not away
+        if (document.activeElement === e.currentTarget && stops.length) {
+          e.preventDefault();
+          stops[e.shiftKey ? stops.length - 1 : 0].focus();
+          break;
+        }
         const at = stops.indexOf(document.activeElement as HTMLElement);
         const leaving = stops.length === 0 || at < 0 || (e.shiftKey ? at === 0 : at === stops.length - 1);
         if (leaving) {

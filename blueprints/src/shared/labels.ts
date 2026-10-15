@@ -1,5 +1,10 @@
-// The name a duplicated page gets unless the owner types another one
-// (shared: the dialog suggests it, the server falls back to it).
+// Names the device and the server must agree on: the name a duplicated
+// page gets unless the owner types another one (the dialog suggests it, the
+// server falls back to it), and colour labels (cleaned the same way on both
+// sides, so the server's echo never changes what's in the field).
+
+import { DEFAULT_LEGEND, LEGEND_FIELD, MAX_LEGEND_CHARS } from "./constants";
+import type { CircleColor, PlanRow } from "./types";
 
 /** "A-101" → "A-101 (copy)", or "A-101 (copy 2)", … — the first that no page in `taken` has; never longer than `max`. */
 export function copyLabel(label: string, taken: Iterable<string>, max: number): string {
@@ -29,4 +34,23 @@ function cutAt(s: string, max: number): string {
   const last = out.charCodeAt(out.length - 1);
   if (last >= 0xd800 && last <= 0xdbff) out = out.slice(0, -1);
   return out;
+}
+
+/**
+ * A colour label as stored: one line (tabs and line breaks become spaces,
+ * other control characters go), at most MAX_LEGEND_CHARS. Not trimmed: it's
+ * saved as it's typed, and trimming would eat the space before the next
+ * word. "" is a valid label (not assigned). null for anything but a string.
+ */
+export function cleanLegend(v: unknown, max = MAX_LEGEND_CHARS): string | null {
+  if (typeof v !== "string") return null;
+  // eslint-disable-next-line no-control-regex
+  const oneLine = v.replace(/[\t\r\n]+/g, " ").replace(/[\u0000-\u001F\u007F]/g, "");
+  return cutAt(oneLine, max);
+}
+
+/** What `color` means in `plan` (its default when the plan doesn't say). */
+export function legendOf(plan: Partial<PlanRow> | null | undefined, color: CircleColor): string {
+  const v = plan?.[LEGEND_FIELD[color]];
+  return typeof v === "string" ? v : DEFAULT_LEGEND[color];
 }

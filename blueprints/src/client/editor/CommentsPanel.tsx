@@ -9,7 +9,8 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { CIRCLE_COLORS, CIRCLE_COLOR_ORDER, DEFAULT_CIRCLE_COLOR, MAX_COMMENT_CHARS, MAX_TITLE_CHARS } from "../../shared/constants";
-import type { CircleRow, CommentRow } from "../../shared/types";
+import { legendOf } from "../../shared/labels";
+import type { CircleColor, CircleRow, CommentRow } from "../../shared/types";
 import { IconCopy, IconTrash, IconX } from "../ui/icons";
 import { useCoarsePointer } from "../ui/media";
 import { usePlanState, type PlanStore } from "../sync";
@@ -45,9 +46,13 @@ export interface CommentsPanelProps {
   editorAlive(): boolean;
   /** Open the Copy circles dialog for this circle; absent when there's no other page to copy to. */
   onCopy?(circle: CircleRow): void;
+  /** A colour was picked for the circle (the editor shows that colour again if this device hides it). */
+  onColorPicked?(color: CircleColor): void;
 }
 
-function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onTypingChange, takeComposerFocus, editorAlive, onCopy }: CommentsPanelProps) {
+function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onTypingChange, takeComposerFocus, editorAlive, onCopy, onColorPicked }: CommentsPanelProps) {
+  const plan = usePlanState(store, (s) => s.plan);
+  const meaning = legendOf(plan, circle.color).trim();
   const comments = usePlanState(store, (s) => s.commentsByCircle.get(circle.id) ?? NO_COMMENTS);
   // the comment being written in the composer: it exists already, but shows in the list only once it's finished
   const [draftId, setDraftId] = useState<string | null>(null);
@@ -80,16 +85,21 @@ function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onT
             {CIRCLE_COLOR_ORDER.map((c) => {
               const p = CIRCLE_COLORS[c];
               const on = circle.color === c;
+              const legend = legendOf(plan, c).trim();
+              const name = legend ? `${p.label}: ${legend}` : p.label;
               return (
                 <button
                   key={c}
                   type="button"
                   className={`cp-swatch${on ? " on" : ""}`}
                   aria-pressed={on}
-                  aria-label={p.label}
-                  title={p.label}
+                  aria-label={name}
+                  title={name}
                   // never part of a size drag that may still be open: its own step, saved now
-                  onClick={() => store.updateCircle(circle.id, { color: c }, { live: false })}
+                  onClick={() => {
+                    store.updateCircle(circle.id, { color: c }, { live: false });
+                    onColorPicked?.(c);
+                  }}
                 >
                   <span style={paperSwatch(p)} />
                 </button>
@@ -98,6 +108,11 @@ function CommentsPanel({ store, circle, editingId, onEditingChange, onClose, onT
           </div>
           <SizeSlider store={store} circle={circle} />
         </div>
+        {meaning && (
+          <p className="cp-legend">
+            <span className="cp-legend-color">{pal.label}</span> {meaning}
+          </p>
+        )}
 
         <section className="cp-comments" aria-label="Comments">
           <h3 className="cp-h">

@@ -1,23 +1,25 @@
 // The editor's top bar: the Kilowatt Events gold band (docs/BRAND.md).
 //
-//   logo ← Plans ┃ plan name  ☰ ‹ Page 2 of 6 · "A-101 Seating bowl" › … [Move|Circle] [↶|↷] (Saved) (?)
+//   logo ← Plans ┃ plan name  ☰ ‹ Page 2 of 6 · "A-101 Seating bowl" › … [Move|Circle] [●●●●● Colors] [↶|↷] (Saved) (?)
 //
 // Below 1100 px the button labels give way to icons (names stay in
 // aria-label/title); on narrow screens the bar wraps to two rows.
 
 import { memo } from "react";
 import { MAX_PLAN_NAME_CHARS } from "../../shared/constants";
-import type { PageRow, PlanRow } from "../../shared/types";
+import type { CircleColor, PageRow, PlanRow } from "../../shared/types";
 import InlineRename from "../ui/InlineRename";
 import SaveStatus from "../ui/SaveStatus";
 import { IconChevron, IconChevronLeft, IconCircle, IconHand, IconRedo, IconSidebar, IconUndo } from "../ui/icons";
-import type { SaveInfo } from "../sync";
+import type { PlanStore, SaveInfo } from "../sync";
 import type { CanvasMode } from "./canvas/BlueprintCanvas";
+import ColorsMenu from "./ColorsMenu";
 import { isMac } from "./format";
 import HeaderHome from "./HeaderHome";
 import HelpMenu from "./HelpMenu";
 
 export interface EditorHeaderProps {
+  store: PlanStore;
   plan: PlanRow | null;
   pages: PageRow[];
   /** Index of the open page among `pages` (-1: none). */
@@ -35,6 +37,9 @@ export interface EditorHeaderProps {
   onUndo(): void;
   onRedo(): void;
   onSaveNow(): void;
+  /** Circle colours hidden on this device (the Colors menu). */
+  hiddenColors: ReadonlySet<CircleColor>;
+  onHiddenColorsChange(next: ReadonlySet<CircleColor>): void;
 }
 
 function EditorHeader(p: EditorHeaderProps) {
@@ -138,6 +143,8 @@ function EditorHeader(p: EditorHeaderProps) {
           <span className="lbl">Circle</span>
         </button>
       </div>
+
+      <ColorsMenu store={p.store} pageId={page?.id ?? null} hidden={p.hiddenColors} onHiddenChange={p.onHiddenColorsChange} />
 
       <div className="hdr-group ed-history" role="group" aria-label="Undo and redo">
         <button type="button" onClick={p.onUndo} disabled={!p.canUndo} aria-label="Undo" title={`Undo (${mod}Z)`}>

@@ -114,27 +114,61 @@ const MIGRATIONS: string[] = [
   UPDATE circles SET color = 'gold', rev = rev + 1 WHERE color = 'amber';
   UPDATE circles SET color = 'black', rev = rev + 1 WHERE color = 'purple';
   `,
+  // 4 — colour labels ("what each colour means"), per event plan. Only new
+  // columns: no page, circle or comment is touched, and existing plans keep
+  // their rev (nobody edited them) — they simply get the defaults: green is
+  // "General notes", the other colours are empty, to be assigned.
+  `
+  ALTER TABLE plans ADD COLUMN legend_gold  TEXT NOT NULL DEFAULT '';
+  ALTER TABLE plans ADD COLUMN legend_black TEXT NOT NULL DEFAULT '';
+  ALTER TABLE plans ADD COLUMN legend_red   TEXT NOT NULL DEFAULT '';
+  ALTER TABLE plans ADD COLUMN legend_blue  TEXT NOT NULL DEFAULT '';
+  ALTER TABLE plans ADD COLUMN legend_green TEXT NOT NULL DEFAULT 'General notes';
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
-export function openDatabase(file: string): Db {
+/** `schema` (tests only): stop at that version, as an older app would have left the database. */
+export function openDatabase(file: string, opts: { schema?: number } = {}): Db {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA synchronous = NORMAL"); // safe with WAL: a power cut can lose the last commit, never corrupt
   db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA busy_timeout = 5000");
-  migrate(db);
+  migrate(db, file, opts.schema ?? MIGRATIONS.length);
   return db;
 }
 
-function migrate(db: Db) {
+/**
+ * backups/app-before-schema-<n>-<UTC stamp>.db next to the database: a
+ * consistent copy (VACUUM INTO) of everything as the previous version left
+ * it. The migrations themselves run in transactions and never delete
+ * anything; this is the belt to their braces. A copy that can't be written
+ * (disk full) is reported, not fatal: the app must still start.
+ */
+function backupBeforeMigrating(db: Db, file: string, from: number, to: number) {
+  try {
+    const dir = path.join(path.dirname(file), "backups");
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+    let out = path.join(dir, `app-before-schema-${to}-from-${from}-${stamp}.db`);
+    for (let i = 1; fs.existsSync(out); i++) out = path.join(dir, `app-before-schema-${to}-from-${from}-${stamp}-${i}.db`);
+    db.exec(`VACUUM INTO '${out.replace(/'/g, "''")}'`);
+  } catch (e) {
+    console.error("[migrate] couldn't write the copy before migrating — migrating anyway", e);
+  }
+}
+
+function migrate(db: Db, file: string, target: number) {
   const current = userVersion(db);
   if (current > MIGRATIONS.length) {
     throw new Error(`The database is newer (schema ${current}) than this app (schema ${MIGRATIONS.length}). Deploy the newer app version.`);
   }
-  for (let v = current; v < MIGRATIONS.length; v++) {
+  // An existing database about to change shape: a full copy first, kept for good (the daily snapshots are pruned, this isn't).
+  if (current > 0 && current < target) backupBeforeMigrating(db, file, current, target);
+  for (let v = current; v < target; v++) {
     tx(db, () => {
       db.exec(MIGRATIONS[v]);
       db.exec(`PRAGMA user_version = ${v + 1}`);

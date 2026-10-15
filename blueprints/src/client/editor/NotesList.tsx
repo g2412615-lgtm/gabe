@@ -1,11 +1,13 @@
 // The Notes tab: every circle in the plan, grouped by page in page order —
 // colour, number, its name (or the start of its first comment) and how many
 // comments it has. Hovering a row lights its circle on the blueprint;
-// choosing one opens its page, selects it and zooms to it.
+// choosing one opens its page, selects it and zooms to it. Circles of the
+// colours this device hides (the Colors menu) are left out, and it says so.
 
 import { memo, useState, type PointerEvent } from "react";
 import { CIRCLE_COLORS, DEFAULT_CIRCLE_COLOR } from "../../shared/constants";
-import type { CircleRow, PageRow } from "../../shared/types";
+import { legendOf } from "../../shared/labels";
+import type { CircleColor, CircleRow, PageRow } from "../../shared/types";
 import { IconComment } from "../ui/icons";
 import { usePlanState, type PlanStore } from "../sync";
 import { circleSummary, circleTag, plural } from "./format";
@@ -21,11 +23,14 @@ export interface NotesListProps {
   /** Light a circle on the canvas while its row is hovered (null: none). */
   onLit(id: string | null): void;
   onOpen(circle: CircleRow): void;
+  hiddenColors: ReadonlySet<CircleColor>;
+  onShowAllColors(): void;
 }
 
 const NONE: CircleRow[] = [];
 
-function NotesList({ store, currentPageId, selectedId, onLit, onOpen }: NotesListProps) {
+function NotesList({ store, currentPageId, selectedId, onLit, onOpen, hiddenColors, onShowAllColors }: NotesListProps) {
+  const plan = usePlanState(store, (s) => s.plan);
   const pages = usePlanState(store, (s) => s.pages);
   const circlesByPage = usePlanState(store, (s) => s.circlesByPage);
   const commentsByCircle = usePlanState(store, (s) => s.commentsByCircle);
@@ -37,9 +42,12 @@ function NotesList({ store, currentPageId, selectedId, onLit, onOpen }: NotesLis
   };
 
   const groups: { page: PageRow; circles: CircleRow[] }[] = [];
+  let hiddenCount = 0;
   for (const page of pages) {
     if (scope === "page" && page.id !== currentPageId) continue;
-    const circles = circlesByPage.get(page.id) ?? NONE;
+    const all = circlesByPage.get(page.id) ?? NONE;
+    const circles = hiddenColors.size ? all.filter((c) => !hiddenColors.has(c.color)) : all;
+    hiddenCount += all.length - circles.length;
     if (circles.length) groups.push({ page, circles });
   }
 
@@ -59,7 +67,16 @@ function NotesList({ store, currentPageId, selectedId, onLit, onOpen }: NotesLis
         </button>
       </div>
 
-      {groups.length === 0 ? (
+      {hiddenCount > 0 && (
+        <p className="nl-hidden">
+          {hiddenCount === 1 ? "1 circle isn't listed: its color is hidden." : `${hiddenCount} circles aren't listed: their colors are hidden.`}{" "}
+          <button type="button" className="link-btn" onClick={onShowAllColors}>
+            Show all colors
+          </button>
+        </p>
+      )}
+
+      {groups.length === 0 && hiddenCount > 0 ? null : groups.length === 0 ? (
         <div className="nl-empty">
           <p className="nl-empty-h">{scope === "page" ? "No circles on this page yet" : "No circles yet"}</p>
           <p>
@@ -90,7 +107,7 @@ function NotesList({ store, currentPageId, selectedId, onLit, onOpen }: NotesLis
                       onFocus={() => onLit(c.id)}
                       onBlur={() => onLit(null)}
                     >
-                      <span className="nl-dot" style={paperSwatch(pal)} aria-hidden="true" />
+                      <span className="nl-dot" style={paperSwatch(pal)} title={legendOf(plan, c.color).trim() || pal.label} aria-hidden="true" />
                       <span className="nl-num">{circleTag(c)}</span>
                       <span className={`nl-text${text ? "" : " none"}`}>{text || "No comments yet"}</span>
                       {n > 0 && (

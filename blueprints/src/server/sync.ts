@@ -12,6 +12,7 @@
 //    rev bump, no updatedAt — replaying a batch changes nothing.
 
 import { circleColorOf, DEFAULT_CIRCLE_COLOR, MAX_CIRCLE_R, MAX_COMMENT_CHARS, MAX_LABEL_CHARS, MAX_PLAN_NAME_CHARS, MAX_TITLE_CHARS, MIN_CIRCLE_R } from "../shared/constants";
+import { cleanLegend } from "../shared/labels";
 import { sameValue } from "../shared/merge";
 import { EDITABLE, type EntityKind, type ID, type PlanRows, type SyncResponse } from "../shared/types";
 import { tx, type Db } from "./db";
@@ -34,6 +35,11 @@ const COLUMN: Record<string, string> = {
   color: "color",
   title: "title",
   body: "body",
+  legendGold: "legend_gold",
+  legendBlack: "legend_black",
+  legendRed: "legend_red",
+  legendBlue: "legend_blue",
+  legendGreen: "legend_green",
   deletedAt: "deleted_at",
 };
 const TO_ROW = { plan: toPlan, page: toPage, circle: toCircle, comment: toComment } as const;
@@ -85,6 +91,12 @@ function cleanField(field: string, v: unknown, current: unknown, now: number): u
       return cleanName(v, MAX_LABEL_CHARS) || undefined; // an empty label keeps the old one
     case "name":
       return cleanName(v, MAX_PLAN_NAME_CHARS) || undefined;
+    case "legendGold":
+    case "legendBlack":
+    case "legendRed":
+    case "legendBlue":
+    case "legendGreen":
+      return cleanLegend(v) ?? undefined; // "" is a label too: not assigned
     default:
       return undefined;
   }
