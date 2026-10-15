@@ -699,6 +699,10 @@ test.describe("the editor", () => {
 
     // ── a new circle comes in gold: gold shows again, and it says so ──
     await press(ed.circleMode, info);
+    // the add-mode hint sits below the hidden-colours chip, not under it
+    const hint = await page.locator(".bp-hint").boundingBox();
+    const chipBox = await chip.boundingBox();
+    expect(hint!.y).toBeGreaterThanOrEqual(chipBox!.y + chipBox!.height);
     await pressAt(page, await sheetPoint(page, 0.45, 0.7), info);
     await expect(ed.toast("Showing gold circles again.")).toBeVisible();
     await expect(ed.circles).toHaveCount(3);
@@ -707,6 +711,12 @@ test.describe("the editor", () => {
 
     // ── Only, then Show all from the map ──
     await press(colors, info);
+    if (!isTouch(info)) {
+      // opened with the mouse, Tab goes into the panel (it doesn't close it)
+      await page.keyboard.press("Tab");
+      await expect(panel).toBeVisible();
+      await expect(panel.getByLabel("Show gold circles")).toBeFocused(); // "Show all" is off: nothing is hidden
+    }
     await press(panel.getByRole("button", { name: "Show only red circles" }), info);
     await expect(ed.circles).toHaveCount(1);
     await expect(colors).toContainText("4 hidden");
@@ -714,6 +724,12 @@ test.describe("the editor", () => {
     await press(chip.getByRole("button", { name: "Show all" }), info);
     await expect(ed.circles).toHaveCount(3);
     await expect(chip).toBeHidden();
+
+    // ── on a phone the Colors button sits in the second header row, with the tools, not beside the name ──
+    await page.setViewportSize({ width: 390, height: 844 });
+    const modes = await ed.moveMode.boundingBox();
+    const colorsBox = await colors.boundingBox();
+    expect(Math.abs(colorsBox!.y - modes!.y)).toBeLessThan(12);
     void gold;
   });
 

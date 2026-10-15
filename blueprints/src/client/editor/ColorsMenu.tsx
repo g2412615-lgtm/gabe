@@ -61,6 +61,7 @@ function ColorsMenu({ store, pageId, hidden, onHiddenChange }: ColorsMenuProps) 
       title="Show, hide and label the circle colors"
       buttonClassName={`ed-colors-btn${hidden.size ? " filtering" : ""}`}
       align="right"
+      className="ed-colors"
       popClassName="cm-pop"
     >
       <div className="cm">

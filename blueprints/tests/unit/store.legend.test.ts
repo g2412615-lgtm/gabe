@@ -95,6 +95,31 @@ describe("a change the previous version left on the device", () => {
     expect(d.store.hasUnsaved()).toBe(false);
   });
 
+  it("an older tab's waiting rename carrying stale labels it was sent can't put them back over newer ones", async () => {
+    const server = new FakeServer({ name: "Old name" });
+    // what the older tab's row looks like: it pulled the plan after the update, so it holds the labels as they were then
+    const p = server.plan;
+    const local = { ...p, name: "Renamed offline", legendRed: "", legendGreen: "General notes", updatedAt: p.updatedAt + 1 };
+    // since then, another device on the new version set two labels
+    server.plan.legendRed = "Security";
+    server.plan.legendGreen = "Staff posts";
+    const storage = new MemoryStorage();
+    for (const sent of [null, { name: "Renamed offline", deletedAt: null }]) {
+      storage.setItem(
+        outboxKey(server.planId),
+        // the older version wrote base and sent with the fields it knew: name and deletedAt
+        JSON.stringify({ v: 2, name: "Renamed offline", entries: { [`plan:${p.id}`]: { local, base: { name: "Old name", deletedAt: null }, sent } } }),
+      );
+      const d = device(server, { storage });
+      await d.store.load();
+      await tick(DEBOUNCE_MS);
+      expect(server.plan).toMatchObject({ name: "Renamed offline", legendRed: "Security", legendGreen: "Staff posts" });
+      expect(d.store.getState().plan).toMatchObject({ legendRed: "Security", legendGreen: "Staff posts" });
+      d.store.dispose();
+      server.plan.name = "Old name";
+    }
+  });
+
   it("normalizeRow keeps labels an entry has and invents none it doesn't", () => {
     const base = { id: "p1", name: "N", createdAt: 1, updatedAt: 2, deletedAt: null, rev: 3 };
     const old = normalizeRow("plan", "p1", "p1", base) as unknown as Record<string, unknown>;

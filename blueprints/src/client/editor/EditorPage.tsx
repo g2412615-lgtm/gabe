@@ -61,6 +61,8 @@ const HOVER_LINGER_MS = 700;
 const PANEL_OUT_MS = 180;
 /** Toasts sit this far up, clear of the canvas's zoom bar (px from the bottom). */
 const ZOOM_CLEAR = { mouse: 66, touch: 82 };
+/** The hidden-colours chip over the stage's top: the add-mode hint, fit and reveal stay below it (px; keep in step with editor.css). */
+const FILTER_CHIP_CLEAR = { mouse: 48, touch: 56 };
 /** How often page render status is polled while pages are being prepared. */
 const POLL_MS = 1500;
 
@@ -654,6 +656,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
         onAdd={onAdd}
         onGesture={onGesture}
         onCancelAdd={cancelAdd}
+        topInset={hiddenColors.size > 0 ? (coarse ? FILTER_CHIP_CLEAR.touch : FILTER_CHIP_CLEAR.mouse) : 0}
         rightInset={rightInset}
         bottomInset={bottomInset}
       />

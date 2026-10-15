@@ -1753,7 +1753,8 @@ button.cp-delete {
     order: 5;
     flex: 1 1 auto;
   }
-  .ed-modes {
+  .ed-modes,
+  .ed-colors {
     order: 6;
   }
   .ed-history {
@@ -1786,6 +1787,10 @@ button.cp-delete {
   }
   .ed-header button.ed-page-name {
     padding: 0 4px;
+  }
+  /* the hollow dots and the black button already say colours are hidden */
+  .cm-badge {
+    display: none;
   }
 }
 

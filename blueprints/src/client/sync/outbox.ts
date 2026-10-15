@@ -261,6 +261,11 @@ export function restoreRow<T extends AnyRow>(kind: EntityKind, e: Pick<OutboxEnt
   const l = e.local as unknown as Record<string, unknown>;
   for (const f of EDITABLE[kind] as readonly string[]) {
     if (!(f in l)) continue;
+    // A field the entry's base doesn't have: the entry was written by an
+    // older version of the app, which couldn't edit it (its row may still
+    // carry a stale copy it was sent) — the server's value stands. Entries
+    // written now always have every editable field in their base.
+    if (e.base && !(f in e.base)) continue;
     const v = l[f];
     if (sameValue(v, out[f])) continue;
     if (e.base && sameValue(v, e.base[f] ?? null)) continue; // not changed here: the server's value stands
