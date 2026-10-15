@@ -1077,6 +1077,55 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
     }
   }
 
+  // ── copies ────────────────────────────────────────────────────────────────
+
+  /**
+   * Make circles (and their comments) from copies, each on its live page,
+   * adding their undo records to `changes`. Returns the new circles' ids, in
+   * order (copies whose page isn't live are left out).
+   */
+  function makeCopies(items: readonly PastedCircle[], changes: RowChange[]): string[] {
+    const ids: string[] = [];
+    const t = now();
+    // a millisecond apart, so the copies (and each one's comments) keep their order until the server numbers them
+    let tick = 0;
+    for (const item of items) {
+      if (!item || typeof item !== "object") continue;
+      const page = doc.page.get(item.pageId);
+      if (!page || page.deletedAt !== null) continue;
+      const id = makeId();
+      const at = t + tick++;
+      const row: CircleRow = {
+        id,
+        planId,
+        pageId: page.id,
+        x: isFiniteNumber(item.x) ? clamp(item.x, 0, 1) : 0.5,
+        y: isFiniteNumber(item.y) ? clamp(item.y, 0, 1) : 0.5,
+        r: isFiniteNumber(item.r) ? clamp(item.r, MIN_CIRCLE_R, MAX_CIRCLE_R) : FALLBACK_R,
+        color: isColor(item.color) ? item.color : DEFAULT_CIRCLE_COLOR,
+        title: typeof item.title === "string" ? cleanText(item.title, MAX_TITLE_CHARS) : "",
+        num: 0,
+        createdAt: at,
+        updatedAt: at,
+        deletedAt: null,
+        rev: 0,
+      };
+      putRow("circle", id, row);
+      changes.push({ kind: "circle", id, before: { deletedAt: t }, after: { deletedAt: null } });
+      ids.push(id);
+      for (const body of Array.isArray(item.comments) ? item.comments : []) {
+        const text = typeof body === "string" ? cleanText(body, MAX_COMMENT_CHARS) : "";
+        if (!text.trim()) continue;
+        const cid = makeId();
+        const cat = t + tick++;
+        const comment: CommentRow = { id: cid, planId, circleId: id, body: text, createdAt: cat, updatedAt: cat, deletedAt: null, rev: 0 };
+        putRow("comment", cid, comment);
+        changes.push({ kind: "comment", id: cid, before: { deletedAt: t }, after: { deletedAt: null } });
+      }
+    }
+    return ids;
+  }
+
   // ── the public API ────────────────────────────────────────────────────────
 
   const store: PlanStore = {
@@ -1150,50 +1199,35 @@ export function createPlanStore(planId: string, options: PlanStoreOptions = {}):
 
     pasteCircles(items) {
       if (!loaded || !Array.isArray(items)) return [];
-      const ids: string[] = [];
-      batch(() => {
+      return batch(() => {
         if (gesture) endGestureInner();
-        const t = now();
-        // a millisecond apart, so the copies (and each one's comments) keep their order until the server numbers them
-        let tick = 0;
         const changes: RowChange[] = [];
-        for (const item of items as readonly PastedCircle[]) {
-          if (!item || typeof item !== "object") continue;
-          const page = doc.page.get(item.pageId);
-          if (!page || page.deletedAt !== null) continue;
-          const id = makeId();
-          const at = t + tick++;
-          const row: CircleRow = {
-            id,
-            planId,
-            pageId: page.id,
-            x: isFiniteNumber(item.x) ? clamp(item.x, 0, 1) : 0.5,
-            y: isFiniteNumber(item.y) ? clamp(item.y, 0, 1) : 0.5,
-            r: isFiniteNumber(item.r) ? clamp(item.r, MIN_CIRCLE_R, MAX_CIRCLE_R) : FALLBACK_R,
-            color: isColor(item.color) ? item.color : DEFAULT_CIRCLE_COLOR,
-            title: typeof item.title === "string" ? cleanText(item.title, MAX_TITLE_CHARS) : "",
-            num: 0,
-            createdAt: at,
-            updatedAt: at,
-            deletedAt: null,
-            rev: 0,
-          };
-          putRow("circle", id, row);
-          changes.push({ kind: "circle", id, before: { deletedAt: t }, after: { deletedAt: null } });
-          ids.push(id);
-          for (const body of Array.isArray(item.comments) ? item.comments : []) {
-            const text = typeof body === "string" ? cleanText(body, MAX_COMMENT_CHARS) : "";
-            if (!text.trim()) continue;
-            const cid = makeId();
-            const cat = t + tick++;
-            const comment: CommentRow = { id: cid, planId, circleId: id, body: text, createdAt: cat, updatedAt: cat, deletedAt: null, rev: 0 };
-            putRow("comment", cid, comment);
-            changes.push({ kind: "comment", id: cid, before: { deletedAt: t }, after: { deletedAt: null } });
-          }
-        }
+        const ids = makeCopies(items, changes);
         commit(changes);
+        return ids;
       });
-      return ids;
+    },
+
+    addDuplicatedPage(pages, pageId, circles) {
+      if (!loaded || !Array.isArray(pages)) return [];
+      return batch(() => {
+        if (gesture) endGestureInner();
+        for (const [kind, r] of rowsOf({ pages })) rebaseRow(kind, r);
+        const page = doc.page.get(pageId);
+        if (!page || page.deletedAt !== null) {
+          persistOutbox();
+          emit();
+          return [];
+        }
+        // made on the server just now: undoing it deletes it (a change the server hears of), redo brings it back
+        const changes: RowChange[] = [{ kind: "page", id: pageId, before: { deletedAt: now() }, after: { deletedAt: null } }];
+        const ids = makeCopies(
+          (Array.isArray(circles) ? circles : []).map((c) => ({ ...c, pageId })),
+          changes,
+        );
+        commit(changes);
+        return ids;
+      });
     },
 
     updateCircle(id, patch: CirclePatch, opts = {}) {

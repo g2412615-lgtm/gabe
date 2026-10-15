@@ -85,6 +85,14 @@ export interface PlanStore {
    * isn't live.
    */
   pasteCircles(items: readonly PastedCircle[]): string[];
+  /**
+   * A page the server has just made as a copy of another (api.duplicatePage):
+   * take in the plan's pages from its reply and put `circles` on the new page
+   * — the whole duplicate is ONE undo step (undo deletes the new page, redo
+   * brings it back). Returns the new circles' ids ([] when the page isn't
+   * there, or the store isn't loaded).
+   */
+  addDuplicatedPage(pages: PageRow[], pageId: string, circles: readonly CircleCopy[]): string[];
   /** Soft delete; one undo step. */
   deleteCircle(id: string): void;
   restoreCircle(id: string): void;

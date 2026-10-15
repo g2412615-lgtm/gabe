@@ -468,6 +468,182 @@ test.describe("the editor", () => {
       .toEqual([[other.x, other.y]]);
   });
 
+  test("duplicate a page with its circles and comments, undo it, then duplicate just the page under a new name", async ({ page }, info) => {
+    const { planId, pages } = await freshPlan(page, info, "Duplicate page");
+    const ed = editor(page);
+    const [p1] = pages;
+    const closePanel = ed.panel.getByRole("button", { name: "Close the panel" });
+
+    const gate = await addCircleAt(page, info, planId, await sheetPoint(page, 0.3, 0.38));
+    await writeComment(page, info, "Mag line at Gate B");
+    await press(closePanel, info);
+    await expectSaved(page);
+
+    // ── with everything ──
+    if (!isTouch(info)) await ed.pageButton("A-101").hover();
+    await press(ed.pageMenu("A-101"), info);
+    await press(page.getByRole("menuitem", { name: "Duplicate page…" }), info);
+    const dialog = page.getByRole("dialog", { name: "Duplicate page" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Name of the copy")).toHaveValue("A-101 (copy)");
+    await expect(dialog.getByRole("radio", { name: "The page, its 1 circle and their 1 comment" })).toBeChecked();
+    await press(dialog.getByRole("button", { name: "Duplicate" }), info);
+    await expect(dialog).toBeHidden();
+    await expect(ed.toast("Duplicated “A-101” as “A-101 (copy)” with 1 circle.")).toBeVisible();
+
+    // the copy opens, right after the original, with the circle and its comment
+    await expect(ed.pager).toContainText("Page 2 of 5");
+    await expect(ed.pager).toContainText("A-101 (copy)");
+    await waitCanvas(page);
+    await expect(ed.circles).toHaveCount(1);
+    await expectSaved(page);
+    let doc = await getPlan(page, planId);
+    const dup = livePages(doc)[1];
+    expect(dup.label).toBe("A-101 (copy)");
+    expect(dup).toMatchObject({ status: "ready", width: p1.width, height: p1.height });
+    const onDup = liveCircles(doc).filter((c) => c.pageId === dup.id);
+    expect(onDup).toHaveLength(1);
+    expect(onDup[0]).toMatchObject({ x: gate.x, y: gate.y, r: gate.r, color: gate.color });
+    expect(onDup[0].num).not.toBe(gate.num);
+    expect(liveComments(doc, onDup[0].id).map((c) => c.body)).toEqual(["Mag line at Gate B"]);
+
+    // ── one undo takes the whole duplicate back ──
+    await press(ed.headerUndo, info);
+    await expect(ed.pageItems).toHaveCount(4);
+    await expect(ed.pageMenu("A-101 (copy)")).toHaveCount(0);
+    await expectSaved(page);
+    await expect.poll(async () => livePages(await getPlan(page, planId)).map((p) => p.label)).toEqual(["A-101", "P-1", "C-201", "R-1"]);
+
+    // ── just the page, under its own name ──
+    if (!isTouch(info)) await ed.pageButton("A-101").hover();
+    await press(ed.pageMenu("A-101"), info);
+    await press(page.getByRole("menuitem", { name: "Duplicate page…" }), info);
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel("Name of the copy").fill("A-101 Day 2");
+    await press(dialog.getByRole("radio", { name: "Just the page" }), info);
+    await press(dialog.getByRole("button", { name: "Duplicate" }), info);
+    await expect(ed.toast("Duplicated “A-101” as “A-101 Day 2”.")).toBeVisible();
+    await expect(ed.pager).toContainText("A-101 Day 2");
+    await waitCanvas(page);
+    await expect(ed.circles).toHaveCount(0);
+    await expectSaved(page);
+
+    await page.reload();
+    await waitCanvas(page);
+    await expect(ed.pageItems).toHaveCount(5);
+    doc = await getPlan(page, planId);
+    expect(livePages(doc).map((p) => p.label)).toEqual(["A-101", "A-101 Day 2", "P-1", "C-201", "R-1"]);
+    expect(liveCircles(doc).filter((c) => c.pageId === livePages(doc)[1].id)).toHaveLength(0);
+  });
+
+  test("Duplicate page: a lost reply and a retry make one copy with its circles; the dialog goes when its page is deleted elsewhere", async ({ page }, info) => {
+    const { planId, pages } = await freshPlan(page, info, "Duplicate · lost reply");
+    const ed = editor(page);
+    const [p1, p2] = pages;
+    await addCircleAt(page, info, planId, await sheetPoint(page, 0.3, 0.38));
+    await press(ed.panel.getByRole("button", { name: "Close the panel" }), info);
+    await expectSaved(page);
+
+    const dialog = page.getByRole("dialog", { name: "Duplicate page" });
+    const openDuplicate = async (label: string) => {
+      if (!isTouch(info)) await ed.pageButton(label).hover();
+      await press(ed.pageMenu(label), info);
+      await press(page.getByRole("menuitem", { name: "Duplicate page…" }), info);
+      await expect(dialog).toBeVisible();
+    };
+
+    // ── the first reply is lost: the server made the copy, this device never heard ──
+    let lost = 0;
+    await page.route("**/api/pages/*/duplicate", async (route) => {
+      if (lost++ === 0) {
+        await route.fetch(); // it reaches the server…
+        await route.abort("connectionreset"); // …and the answer never comes back
+      } else await route.continue();
+    });
+    await openDuplicate("A-101");
+    const name = dialog.getByLabel("Name of the copy");
+    if (isTouch(info)) {
+      // the iPad keyboard's "done" key only puts the keyboard away
+      await press(name, info);
+      await name.press("Enter");
+      await expect(dialog).toBeVisible();
+      await expect(name).not.toBeFocused();
+    }
+    await press(dialog.getByRole("button", { name: "Duplicate" }), info);
+    await expect(dialog.getByRole("alert")).toContainText("The page wasn't duplicated.");
+    // trying again finishes that same copy
+    await press(dialog.getByRole("button", { name: "Duplicate" }), info);
+    await expect(dialog).toBeHidden();
+    await expect(ed.toast("Duplicated “A-101” as “A-101 (copy)” with 1 circle.")).toBeVisible();
+    await expect(ed.pager).toContainText("Page 2 of 5");
+    await waitCanvas(page);
+    await expect(ed.circles).toHaveCount(1);
+    await expectSaved(page);
+    const doc = await getPlan(page, planId);
+    expect(livePages(doc).map((p) => p.label)).toEqual(["A-101", "A-101 (copy)", "P-1", "C-201", "R-1"]);
+    expect(liveCircles(doc).filter((c) => c.pageId === livePages(doc)[1].id)).toHaveLength(1);
+    await page.unroute("**/api/pages/*/duplicate");
+
+    // ── the page is deleted on another device while the dialog is open ──
+    await openDuplicate("P-1");
+    const row = (await getPlan(page, planId)).pages.find((p) => p.id === p2.id)!;
+    const editable = { label: row.label, sortOrder: row.sortOrder, deletedAt: null };
+    const res = await page.request.post(`/api/plans/${planId}/sync`, {
+      data: { ops: [{ kind: "page", id: p2.id, base: editable, data: { ...editable, deletedAt: Date.now() } }] },
+    });
+    expect(res.ok()).toBe(true);
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect(dialog).toBeHidden();
+    await expect(ed.toast("That page was deleted on another device, so it wasn't duplicated.")).toBeVisible();
+    await expect(ed.pageMenu("P-1")).toHaveCount(0);
+    expect(livePages(await getPlan(page, planId)).map((p) => p.label)).toEqual(["A-101", "A-101 (copy)", "C-201", "R-1"]);
+    void p1;
+  });
+
+  test("Duplicate page: the original deleted elsewhere while the copy is being made — the copy still lands, no contradicting message", async ({ page }, info) => {
+    const { planId, pages } = await freshPlan(page, info, "Duplicate · deleted meanwhile");
+    const ed = editor(page);
+    const [p1] = pages;
+    await addCircleAt(page, info, planId, await sheetPoint(page, 0.3, 0.38));
+    await press(ed.panel.getByRole("button", { name: "Close the panel" }), info);
+    await expectSaved(page);
+
+    // the server makes the copy, then A-101 is deleted on another device and this one hears of it — all before the reply arrives
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    await page.route("**/api/pages/*/duplicate", async (route) => {
+      const res = await route.fetch();
+      await held;
+      await route.fulfill({ response: res });
+    });
+    if (!isTouch(info)) await ed.pageButton("A-101").hover();
+    await press(ed.pageMenu("A-101"), info);
+    await press(page.getByRole("menuitem", { name: "Duplicate page…" }), info);
+    const dialog = page.getByRole("dialog", { name: "Duplicate page" });
+    await press(dialog.getByRole("button", { name: "Duplicate" }), info);
+    await expect(dialog.getByRole("button", { name: "Duplicating…" })).toBeVisible();
+    await expect.poll(async () => livePages(await getPlan(page, planId)).length).toBe(5); // made on the server
+
+    const row = (await getPlan(page, planId)).pages.find((p) => p.id === p1.id)!;
+    const editable = { label: row.label, sortOrder: row.sortOrder, deletedAt: null };
+    expect(
+      (await page.request.post(`/api/plans/${planId}/sync`, { data: { ops: [{ kind: "page", id: p1.id, base: editable, data: { ...editable, deletedAt: Date.now() } }] } })).ok(),
+    ).toBe(true);
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect(ed.pageMenu("A-101")).toHaveCount(0); // this device knows A-101 is gone…
+    await expect(dialog).toBeVisible(); // …and the dialog waits for its answer
+
+    release();
+    await expect(dialog).toBeHidden();
+    await expect(ed.toast("Duplicated “A-101” as “A-101 (copy)” with 1 circle.")).toBeVisible();
+    await expect(ed.toast(/wasn't duplicated/)).toHaveCount(0);
+    await expect(ed.pager).toContainText("A-101 (copy)");
+    await waitCanvas(page);
+    await expect(ed.circles).toHaveCount(1);
+    await expectSaved(page);
+    await page.unroute("**/api/pages/*/duplicate");
+  });
+
   test("add pages from a second PDF, delete one page; home shows the counts", async ({ page }, info) => {
     const { planId } = await freshPlan(page, info, "Add + delete pages");
     const ed = editor(page);

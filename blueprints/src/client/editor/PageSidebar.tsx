@@ -1,8 +1,8 @@
 // The left sidebar: Pages | Notes tabs (DeployMap's .evtabs, with the KWE gold underline).
 //
 //  - Pages: a thumbnail per page with its label, circle count and render
-//    status; a ⋯ menu to rename, reorder, copy its circles to another page
-//    and delete; "Add pages" uploads more files into the plan, with a
+//    status; a ⋯ menu to rename, reorder, duplicate, copy its circles to
+//    another page and delete; "Add pages" uploads more files into the plan, with a
 //    progress row per file.
 //  - Notes: NotesList.
 //
@@ -20,7 +20,7 @@ import InlineRename from "../ui/InlineRename";
 import Menu from "../ui/Menu";
 import Progress from "../ui/Progress";
 import Spinner from "../ui/Spinner";
-import { IconChevron, IconCopy, IconEdit, IconLayers, IconList, IconMore, IconSidebar, IconTrash, IconUpload, IconX } from "../ui/icons";
+import { IconChevron, IconCopy, IconEdit, IconFilePlus, IconLayers, IconList, IconMore, IconSidebar, IconTrash, IconUpload, IconX } from "../ui/icons";
 import { usePlanState, type PlanStore } from "../sync";
 import { deletePageWithUndo, retryPage } from "./actions";
 import { plural } from "./format";
@@ -48,6 +48,8 @@ export interface PageSidebarProps {
   onLit(id: string | null): void;
   /** Open the Copy circles dialog for this page's circles. */
   onCopyCircles(pageId: string): void;
+  /** Open the Duplicate page dialog. */
+  onDuplicatePage(pageId: string): void;
   uploads: AddPages;
 }
 
@@ -150,6 +152,7 @@ function PageSidebar(p: PageSidebarProps) {
                   circles={circlesByPage.get(page.id) ?? NONE}
                   onOpen={p.onOpenPage}
                   onCopy={p.onCopyCircles}
+                  onDuplicate={p.onDuplicatePage}
                 />
               ))}
             </ol>
@@ -193,9 +196,10 @@ interface PageItemProps {
   circles: CircleRow[];
   onOpen(id: string): void;
   onCopy(id: string): void;
+  onDuplicate(id: string): void;
 }
 
-const PageItem = memo(function PageItem({ store, page, index, count, active, circles, onOpen, onCopy }: PageItemProps) {
+const PageItem = memo(function PageItem({ store, page, index, count, active, circles, onOpen, onCopy, onDuplicate }: PageItemProps) {
   const [renaming, setRenaming] = useState(false);
 
   const askDelete = async () => {
@@ -258,7 +262,7 @@ const PageItem = memo(function PageItem({ store, page, index, count, active, cir
         <Menu
           label={<IconMore size={16} />}
           ariaLabel={`More for “${page.label}”`}
-          title="Rename, move, copy circles or delete"
+          title="Rename, move, duplicate, copy circles or delete"
           buttonClassName="ghost small icon-btn ps-more"
           align="right"
           items={[
@@ -274,6 +278,12 @@ const PageItem = memo(function PageItem({ store, page, index, count, active, cir
               icon: <IconChevron size={14} className="rot-down" />,
               disabled: index >= count - 1,
               onSelect: () => store.movePage(page.id, index + 1),
+            },
+            {
+              label: "Duplicate page…",
+              icon: <IconFilePlus size={14} />,
+              disabled: page.status === "failed",
+              onSelect: () => onDuplicate(page.id),
             },
             count > 1 && {
               label: "Copy circles to another page…",

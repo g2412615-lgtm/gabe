@@ -8,6 +8,7 @@
 // hidden when it or its page is deleted; a comment when it, its circle or
 // the circle's page is deleted.
 
+import { comparePages } from "../../shared/order";
 import type { CircleRow, CommentRow, ID, PageRow } from "../../shared/types";
 
 /** The document as the engine keeps it, with a version counter per kind (bumped on every change). */
@@ -29,9 +30,7 @@ export interface Derived {
 const EMPTY_CIRCLES = Object.freeze([]) as unknown as CircleRow[];
 const EMPTY_COMMENTS = Object.freeze([]) as unknown as CommentRow[];
 
-export function comparePages(a: PageRow, b: PageRow): number {
-  return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt || a.sourceIndex - b.sourceIndex || cmpStr(a.id, b.id);
-}
+export { comparePages };
 
 /** By number; circles the server hasn't numbered yet (num 0) come last, oldest first. */
 export function compareCircles(a: CircleRow, b: CircleRow): number {

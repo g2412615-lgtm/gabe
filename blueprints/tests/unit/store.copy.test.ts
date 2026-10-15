@@ -145,6 +145,60 @@ describe("pasteCircles", () => {
   });
 });
 
+describe("addDuplicatedPage", () => {
+  it("takes in the new page and its circles as ONE undo step: undo deletes the page, redo brings it back", async () => {
+    const d = await open();
+    const [p1] = d.pages;
+    const src = d.store.addCircle({ pageId: p1.id, x: 0.2, y: 0.3, r: 0.02 });
+    d.store.addComment(src, "Barricade line");
+    await tick(DEBOUNCE_MS);
+
+    // the server made the copy (as POST /pages/:id/duplicate does)
+    const made = d.server.addPage("Page 1 (copy)", { sortOrder: 1.5 });
+    const pages = [...d.server.pages.values()];
+    const st0 = d.store.getState();
+    const copies = [copyOf(st0.circleById.get(src)!, st0.commentsByCircle.get(src), true)];
+    const ids = d.store.addDuplicatedPage(pages, made.id, copies);
+
+    let st = d.store.getState();
+    expect(st.pages.map((p) => p.id).slice(0, 2)).toEqual([p1.id, made.id]);
+    expect(st.circlesByPage.get(made.id)!.map((c) => c.id)).toEqual(ids);
+    expect(st.circleById.get(ids[0])).toMatchObject({ x: 0.2, y: 0.3, r: 0.02, pageId: made.id });
+    expect(st.commentsByCircle.get(ids[0])!.map((c) => c.body)).toEqual(["Barricade line"]);
+    await tick(DEBOUNCE_MS);
+    expect(d.server.circles.get(ids[0])!.num).toBe(2);
+
+    d.store.undo();
+    st = d.store.getState();
+    expect(st.pageById.has(made.id)).toBe(false);
+    expect(st.circleById.has(ids[0])).toBe(false);
+    await tick(DEBOUNCE_MS);
+    expect(d.server.pages.get(made.id)!.deletedAt).not.toBeNull(); // the server hears of it
+    expect(d.store.getState().circleById.has(src)).toBe(true); // the original is untouched
+
+    d.store.redo();
+    await tick(DEBOUNCE_MS);
+    expect(d.server.pages.get(made.id)!.deletedAt).toBeNull();
+    expect(d.store.getState().circlesByPage.get(made.id)!.map((c) => c.id)).toEqual(ids);
+  });
+
+  it("just the page: one step, no circles", async () => {
+    const d = await open();
+    const made = d.server.addPage("Page 1 (copy)", { sortOrder: 1.5 });
+    expect(d.store.addDuplicatedPage([...d.server.pages.values()], made.id, [])).toEqual([]);
+    expect(d.store.getState().pageById.has(made.id)).toBe(true);
+    expect(d.store.getState().canUndo).toBe(true);
+    d.store.undo();
+    expect(d.store.getState().pageById.has(made.id)).toBe(false);
+  });
+
+  it("does nothing for a page that isn't in the reply", async () => {
+    const d = await open();
+    expect(d.store.addDuplicatedPage([...d.server.pages.values()], "not-there", [copy()])).toEqual([]);
+    expect(d.store.getState().canUndo).toBe(false);
+  });
+});
+
 // ── the editor's helpers ───────────────────────────────────────────────
 
 const circle = (over: Partial<CircleRow> = {}): CircleRow => ({

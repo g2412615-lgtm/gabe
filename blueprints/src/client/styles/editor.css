@@ -1366,6 +1366,42 @@ button.cp-delete {
   border-color: currentColor;
 }
 
+/* ── Duplicate page dialog (DuplicatePageDialog.tsx) ─────────────────── */
+.dp {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* focused on open only to put focus inside the dialog (touch screens): no ring */
+.dp:focus {
+  outline: none;
+}
+.dp > p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  line-height: var(--lh-body);
+}
+.dp-bring {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.dp-bring legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.dp-bring .cc-row {
+  border-top: 1px solid var(--border);
+}
+.dp-bring .cc-row:last-child {
+  border-bottom: 1px solid var(--border);
+}
+
 /* ── Copy circles dialog (CopyCirclesDialog.tsx) ─────────────────────── */
 .cc {
   display: flex;
