@@ -42,7 +42,7 @@ export default function HelpMenu() {
         <Row k="Press and hold">Add a circle there</Row>
         <Row k="Drag a dot">Resize the selected circle</Row>
         <Row k="Drag the ✥ in its middle">Move the selected circle</Row>
-        <Row k="⋯ beside a page">Copy its circles to another page</Row>
+        <Row k="⋯ beside a page">Duplicate it, or copy its circles to another page</Row>
       </dl>
     </section>
   );
@@ -58,7 +58,7 @@ export default function HelpMenu() {
         <Row k="Click a circle">Keep its comments open</Row>
         <Row k="Drag a dot">Resize the selected circle</Row>
         <Row k="Drag the ✥">Move the selected circle</Row>
-        <Row k="⋯ beside a page">Copy its circles to another page</Row>
+        <Row k="⋯ beside a page">Duplicate it, or copy its circles to another page</Row>
       </dl>
     </section>
   );

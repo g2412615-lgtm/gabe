@@ -8,7 +8,7 @@
 // The plan store is the single source of truth for the plan's rows and
 // autosaves every change; this component holds only view state: which page
 // is open, which circle is selected or hovered, the tool, the sidebar, the
-// Copy circles dialog.
+// Copy circles and Duplicate page dialogs.
 //
 // The comments panel follows the pointer on a desktop: it shows a hovered
 // circle (unless the owner is typing in the panel) and falls back to the
@@ -32,6 +32,7 @@ import { deleteCircleWithUndo, registerEditorStore, retryPage } from "./actions"
 import CommentsPanel, { type TypingField } from "./CommentsPanel";
 import { circleClipFor, copyOf, placeCopies, setCircleClip } from "./copyCircles";
 import CopyCirclesDialog, { type CopyRequest } from "./CopyCirclesDialog";
+import DuplicatePageDialog from "./DuplicatePageDialog";
 import EditorHeader from "./EditorHeader";
 import PageSidebar, { type SidebarTab } from "./PageSidebar";
 import { circleName, isMac } from "./format";
@@ -116,6 +117,8 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   const [drawerOpen, setDrawerOpen] = useState(false);
   /** The Copy circles dialog, while it's open (a new key per opening: it starts afresh). */
   const [copyReq, setCopyReq] = useState<(CopyRequest & { key: number }) | null>(null);
+  /** The page the Duplicate page dialog is open for. */
+  const [dupPageId, setDupPageId] = useState<string | null>(null);
   const narrow = useMediaQuery("(max-width: 899px)");
   const sheet = useMediaQuery("(max-width: 699px)");
 
@@ -414,6 +417,8 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   const copyPageCircles = useCallback((fromPageId: string) => setCopyReq({ fromPageId, circleIds: null, key: ++copySeq.current }), []);
   const copyCircle = useCallback((c: CircleRow) => setCopyReq({ fromPageId: c.pageId, circleIds: [c.id], key: ++copySeq.current }), []);
   const closeCopy = useCallback(() => setCopyReq(null), []);
+  const duplicatePage = useCallback((id: string) => setDupPageId(id), []);
+  const closeDuplicate = useCallback(() => setDupPageId(null), []);
   // a toast's "Show" opens a page in this editor: once it's closed the button would do nothing, so the toast goes too
   const editorToasts = useRef(new Set<number>());
   const trackEditorToast = useCallback((id: number) => void editorToasts.current.add(id), []);
@@ -650,6 +655,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
           onOpenCircle={openCircle}
           onLit={setNotesLit}
           onCopyCircles={copyPageCircles}
+          onDuplicatePage={duplicatePage}
           uploads={uploads}
         />
         {narrow && <div className={`ed-scrim${drawerOpen ? " on" : ""}`} onClick={() => setDrawerOpen(false)} aria-hidden="true" />}
@@ -701,6 +707,16 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
           currentPageId={pageId}
           onShowPage={openPage}
           onEditorToast={trackEditorToast}
+        />
+      )}
+      {dupPageId && pageById.get(dupPageId) && (
+        <DuplicatePageDialog
+          key={dupPageId}
+          store={store}
+          page={pageById.get(dupPageId)!}
+          onClose={closeDuplicate}
+          onDone={openPage}
+          editorAlive={editorAlive}
         />
       )}
     </div>

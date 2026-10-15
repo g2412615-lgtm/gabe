@@ -1,12 +1,13 @@
-// Page retry, rendered page assets (preview, thumbnail, deep-zoom tiles) and
-// the original uploaded file.
+// Page retry and duplicate, rendered page assets (preview, thumbnail,
+// deep-zoom tiles) and the original uploaded file.
 
 import fsp from "node:fs/promises";
 import fs from "node:fs";
 import path from "node:path";
 import { Hono, type Context } from "hono";
 import type { AppDeps } from "../context";
-import { HttpError, idParam, isId, MSG } from "../http";
+import { duplicatePage } from "../duplicate";
+import { HttpError, idParam, isId, isRecord, MSG, readJson } from "../http";
 import { newAssetKey } from "../render/queue";
 import { getPage, getPlan, getSource } from "../repo";
 import { fileStream } from "../static";
@@ -74,6 +75,15 @@ export function pageRoutes(deps: AppDeps) {
       deps.kickRender();
     }
     return c.json({ page: getPage(db, id) });
+  });
+
+  // A copy of the page right after it: { label? } → 201 { page, pages }.
+  r.post("/pages/:id/duplicate", async (c) => {
+    const id = idParam(c, "id", MSG.pageNotFound);
+    const body = await readJson(c, 8 * 1024);
+    const res = duplicatePage(db, config.dataDir, id, isRecord(body) ? body.label : undefined);
+    if (res.queued) deps.kickRender();
+    return c.json({ page: res.page, pages: res.pages }, 201);
   });
 
   // The uploaded file exactly as it arrived.

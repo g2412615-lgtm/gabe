@@ -202,6 +202,14 @@ export interface UploadResponse {
   pages: PageRow[];
 }
 
+/** POST /api/pages/:id/duplicate → 201. */
+export interface DuplicatePageResponse {
+  /** The new page. */
+  page: PageRow;
+  /** Every page of the plan (a few may have been renumbered to make room). */
+  pages: PageRow[];
+}
+
 export interface ApiError {
   error: string;
 }
