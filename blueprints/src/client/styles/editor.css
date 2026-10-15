@@ -1724,7 +1724,8 @@ button.cp-delete {
   }
 }
 
-/* the header wraps to two rows: name, save, help on top; pages and tools below */
+/* the header wraps to two rows: name, colors, save, help on top; pages and tools below
+   (the second row has no room left for Colors on a phone or with its words) */
 @media (max-width: 899px) {
   .ed-header {
     flex-wrap: wrap;
@@ -1753,8 +1754,7 @@ button.cp-delete {
     order: 5;
     flex: 1 1 auto;
   }
-  .ed-modes,
-  .ed-colors {
+  .ed-modes {
     order: 6;
   }
   .ed-history {
@@ -1788,9 +1788,27 @@ button.cp-delete {
   .ed-header button.ed-page-name {
     padding: 0 4px;
   }
-  /* the hollow dots and the black button already say colours are hidden */
+  /* Colors as a small square: the five dots three over two, so the plan
+     name keeps its room (the hollow dots and the black button already say
+     colours are hidden) */
   .cm-badge {
     display: none;
+  }
+  .ed-header button.ed-colors-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+  .ed-colors-btn .cm-dots {
+    width: 28px;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 2px;
+  }
+  .ed-colors-btn .cm-dot {
+    width: 8px;
+    height: 8px;
   }
 }
 
@@ -1938,6 +1956,13 @@ button.cp-delete {
   /* the page-rename field: under 16 px, iPad Safari zooms the whole editor in when it takes focus */
   .ps-rename.model-name-input {
     font-size: 16px !important;
+  }
+}
+
+/* a phone's Colors square is a full finger target */
+@media (pointer: coarse) and (max-width: 599px) {
+  .ed-header button.ed-colors-btn {
+    width: var(--hit);
   }
 }
 

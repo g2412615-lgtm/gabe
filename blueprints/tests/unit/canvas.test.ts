@@ -631,6 +631,19 @@ describe("view math", () => {
     expect(usableArea(SIZE, { top: 0, right: 0, bottom: 200 })).toEqual({ x: 0, y: 0, w: 1000, h: 500 });
   });
 
+  it("the top inset (the hidden-colours chip) gives way before the bottom sheet when both don't fit", () => {
+    // a short phone stage (home-screen app in landscape): the sheet still counts, the chip doesn't
+    const short = { w: 667, h: 205 };
+    expect(visibleArea(short, { top: 56, right: 0, bottom: 123 })).toEqual({ x: 0, y: 0, w: 667, h: 82 });
+    expect(usableArea(SIZE, { top: 56, right: 0, bottom: 420 })).toEqual({ x: 0, y: 0, w: 1000, h: 280 });
+    // room for both: both count
+    expect(visibleArea(SIZE, { top: 56, right: 0, bottom: 420 })).toEqual({ x: 0, y: 56, w: 1000, h: 224 });
+    expect(usableArea(SIZE, { top: 56, right: 0, bottom: 200 })).toEqual({ x: 0, y: 56, w: 1000, h: 444 });
+    // a sheet too big to count still leaves the chip's inset
+    expect(visibleArea({ w: 667, h: 150 }, { top: 56, right: 0, bottom: 90 })).toEqual({ x: 0, y: 56, w: 667, h: 94 });
+    expect(usableArea(SIZE, { top: 56, right: 0, bottom: 450 })).toEqual({ x: 0, y: 56, w: 1000, h: 644 });
+  });
+
   // ── #26: a pinch fetches only the level it ends on ──
 
   const BIG_PAGE = {

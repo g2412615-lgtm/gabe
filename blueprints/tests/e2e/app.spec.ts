@@ -725,11 +725,27 @@ test.describe("the editor", () => {
     await expect(ed.circles).toHaveCount(3);
     await expect(chip).toBeHidden();
 
-    // ── on a phone the Colors button sits in the second header row, with the tools, not beside the name ──
-    await page.setViewportSize({ width: 390, height: 844 });
-    const modes = await ed.moveMode.boundingBox();
-    const colorsBox = await colors.boundingBox();
-    expect(Math.abs(colorsBox!.y - modes!.y)).toBeLessThan(12);
+    // ── narrow screens: two header rows (name, Colors, save, help; then pages and tools) that hiding a colour doesn't change ──
+    const undo = page.getByRole("button", { name: "Undo" });
+    const yOf = async (l: typeof colors) => (await l.boundingBox())!.y;
+    const stageTop = () => yOf(page.locator(".ed-stage"));
+    for (const width of [390, 700]) {
+      await page.setViewportSize({ width, height: 844 });
+      const top = await stageTop();
+      expect(Math.abs((await yOf(undo)) - (await yOf(ed.moveMode)))).toBeLessThan(12); // undo/redo on the tools' row
+      expect(await yOf(colors)).toBeLessThan((await yOf(ed.moveMode)) - 20); // Colors on the top row
+      expect((await page.locator(".ed-title").boundingBox())!.width).toBeGreaterThanOrEqual(100); // the plan name keeps its room
+      await press(colors, info);
+      const box = (await panel.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      await press(panel.getByRole("button", { name: "Show only red circles" }), info);
+      await page.keyboard.press("Escape");
+      await expect(chip).toBeVisible();
+      expect(await stageTop()).toBe(top); // the header didn't grow
+      await press(chip.getByRole("button", { name: "Show all" }), info);
+      await expect(chip).toBeHidden();
+    }
     void gold;
   });
 
