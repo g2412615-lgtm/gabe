@@ -8,11 +8,25 @@ export function copyLabel(label: string, taken: Iterable<string>, max: number): 
   const base = label.replace(/ \(copy(?: \d+)?\)$/, "") || label;
   for (let n = 1; ; n++) {
     const suffix = n === 1 ? " (copy)" : ` (copy ${n})`;
-    let cut = base.slice(0, Math.max(0, max - suffix.length));
-    // never half an emoji: drop a high surrogate left without its pair
-    const last = cut.charCodeAt(cut.length - 1);
-    if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
-    const name = `${cut.trimEnd()}${suffix}`;
+    const name = `${cutAt(base, Math.max(0, max - suffix.length)).trimEnd()}${suffix}`;
     if (!used.has(name) || n > 999) return name;
   }
+}
+
+/** At most `max` UTF-16 units of `s`, cut between whole characters (never half an emoji, a flag or a joined sequence). */
+function cutAt(s: string, max: number): string {
+  if (s.length <= max) return s;
+  if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
+    let out = "";
+    for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s)) {
+      if (out.length + segment.length > max) break;
+      out += segment;
+    }
+    return out;
+  }
+  // no Segmenter: at least never leave half a surrogate pair
+  let out = s.slice(0, max);
+  const last = out.charCodeAt(out.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) out = out.slice(0, -1);
+  return out;
 }

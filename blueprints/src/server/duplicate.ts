@@ -39,23 +39,14 @@ export interface DuplicateResult {
 }
 
 export const COPY_GONE = "That copy was deleted in the meantime. Close this and duplicate the page again.";
+export const ID_TAKEN = "That copy can't be made with this id. Close this and duplicate the page again.";
 
 export function duplicatePage(db: Db, dataDir: string, pageId: string, opts: { label?: unknown; id?: unknown } = {}): DuplicateResult {
-  const source = livePage(db, pageId);
   const wantedId = isId(opts.id) ? opts.id : null;
-  if (wantedId) {
-    const existing = getPage(db, wantedId);
-    if (existing) {
-      // made by an earlier try of this same duplicate: hand it back (anything else with this id isn't ours to return)
-      const same =
-        existing.id !== source.id &&
-        existing.planId === source.planId &&
-        existing.sourceId === source.sourceId &&
-        existing.sourceIndex === source.sourceIndex;
-      if (!same || existing.deletedAt !== null) throw new HttpError(409, COPY_GONE);
-      return { page: existing, pages: pagesOfPlan(db, existing.planId), queued: false, created: false };
-    }
-  }
+  // first: a retry finds its copy even if the original has been deleted since
+  const existing = wantedId ? getPage(db, wantedId) : null;
+  if (existing) return replay(db, existing, pageId, opts.label);
+  const source = livePage(db, pageId);
   const id = wantedId ?? randomUUID();
   const wantedLabel = opts.label;
   const fromDir = path.join(dataDir, "assets", source.id, source.assetKey);
@@ -123,6 +114,34 @@ export function duplicatePage(db: Db, dataDir: string, pageId: string, opts: { l
     fs.rmSync(pageDir, { recursive: true, force: true });
     throw e;
   }
+}
+
+/**
+ * A page with the id the device chose already exists: the copy an earlier
+ * try of this duplicate made (its reply was lost). Hand it back — under the
+ * name asked for now, if that changed. A page that isn't a copy of the same
+ * sheet isn't ours to return.
+ */
+function replay(db: Db, existing: PageRow, pageId: string, wantedLabel: unknown): DuplicateResult {
+  const src = getPage(db, pageId);
+  const sameSheet =
+    !!src &&
+    existing.id !== src.id &&
+    existing.planId === src.planId &&
+    existing.sourceId === src.sourceId &&
+    existing.sourceIndex === src.sourceIndex;
+  if (!sameSheet) throw new HttpError(409, ID_TAKEN);
+  const plan = getPlan(db, existing.planId);
+  if (existing.deletedAt !== null || !plan || plan.deletedAt !== null) throw new HttpError(409, COPY_GONE);
+  const label = cleanName(wantedLabel, MAX_LABEL_CHARS);
+  if (label && label !== existing.label) {
+    tx(db, () => {
+      const now = Date.now();
+      db.prepare("UPDATE pages SET label = ?, updated_at = ?, rev = rev + 1 WHERE id = ?").run(label, now, existing.id);
+      db.prepare("UPDATE plans SET updated_at = ? WHERE id = ?").run(now, existing.planId);
+    });
+  }
+  return { page: getPage(db, existing.id) as PageRow, pages: pagesOfPlan(db, existing.planId), queued: false, created: false };
 }
 
 /** The page, if it and its plan are live; else 404. */

@@ -173,8 +173,30 @@ describe("a retry with the same id (the reply was lost)", () => {
     expect((await fetchAsset(`/api/pages/${id}/${first.json.page.assetKey}/preview.webp`)).status).toBe(200);
   });
 
+  it("takes the name asked for now, and still answers once the original has been deleted", async () => {
+    const id = "copy-retry-0004";
+    const first = (await duplicate(original[0].id, { id, label: "Level 2 eats" })).json.page;
+    const renamed = await duplicate(original[0].id, { id, label: "Level 2 east" });
+    expect(renamed.status).toBe(200);
+    expect(renamed.json.page.label).toBe("Level 2 east");
+    expect(renamed.json.page.rev).toBeGreaterThan(first.rev); // the device adopts the new name
+    // the original goes (on another device) before the next try
+    server.db.prepare("UPDATE pages SET deleted_at = ? WHERE id = ?").run(Date.now(), original[0].id);
+    try {
+      const again = await duplicate(original[0].id, { id });
+      expect(again.status).toBe(200);
+      expect(again.json.page.id).toBe(id);
+      // a new copy of the deleted page can't be made
+      expect((await duplicate(original[0].id, { id: "copy-retry-0005" })).status).toBe(404);
+    } finally {
+      server.db.prepare("UPDATE pages SET deleted_at = NULL WHERE id = ?").run(original[0].id);
+    }
+  });
+
   it("refuses an id that belongs to another page (or to the original itself), and a copy deleted meanwhile", async () => {
-    expect((await duplicate(original[0].id, { id: original[0].id })).status).toBe(409);
+    const taken = await duplicate(original[0].id, { id: original[0].id });
+    expect(taken.status).toBe(409);
+    expect((taken.json as unknown as { error: string }).error).toMatch(/can't be made with this id/);
     expect((await duplicate(original[0].id, { id: original[3].id })).status).toBe(409);
     const made = (await duplicate(original[0].id, { id: "copy-retry-0002" })).json.page;
     server.db.prepare("UPDATE pages SET deleted_at = ? WHERE id = ?").run(Date.now(), made.id);
@@ -231,6 +253,13 @@ describe("copyLabel", () => {
     expect(name.length).toBeLessThanOrEqual(200);
     expect(name).toMatch(/^x{192}🎪* \(copy\)$/u);
     expect(/[\ud800-\udbff](?![\udc00-\udfff])/.test(name)).toBe(false);
+  });
+
+  it("never cuts a flag or a joined emoji sequence in half either", () => {
+    const flags = "x".repeat(191) + "🇫🇷🇫🇷";
+    expect(copyLabel(flags, [flags], 200)).toBe("x".repeat(191) + " (copy)");
+    const family = "x".repeat(190) + "👨‍👩‍👧👨‍👩‍👧";
+    expect(copyLabel(family, [family], 200)).toBe("x".repeat(190) + " (copy)");
   });
 
   it("stays within the length limit", () => {

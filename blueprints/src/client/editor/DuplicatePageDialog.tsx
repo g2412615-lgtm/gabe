@@ -8,7 +8,7 @@
 // try: when a reply is lost (venue Wi-Fi), trying again gets the copy the
 // first try made, and its circles go onto it — never a second copy.
 
-import { useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { MAX_LABEL_CHARS } from "../../shared/constants";
 import { copyLabel } from "../../shared/labels";
 import type { CircleRow, PageRow } from "../../shared/types";
@@ -27,6 +27,7 @@ type Bring = "page" | "circles" | "comments";
 
 export interface DuplicatePageDialogProps {
   store: PlanStore;
+  /** The page as it was when the dialog opened (it follows the live row while there is one). */
   page: PageRow;
   onClose(): void;
   /** The copy is made: open it. */
@@ -37,7 +38,9 @@ export interface DuplicatePageDialogProps {
 
 const NONE: CircleRow[] = [];
 
-export default function DuplicatePageDialog({ store, page, onClose, onDone, editorAlive }: DuplicatePageDialogProps) {
+export default function DuplicatePageDialog({ store, page: opened, onClose, onDone, editorAlive }: DuplicatePageDialogProps) {
+  const livePage = usePlanState(store, (s) => s.pageById.get(opened.id));
+  const page = livePage ?? opened;
   const pages = usePlanState(store, (s) => s.pages);
   const circles = usePlanState(store, (s) => s.circlesByPage.get(page.id) ?? NONE);
   const commentsByCircle = usePlanState(store, (s) => s.commentsByCircle);
@@ -48,6 +51,22 @@ export default function DuplicatePageDialog({ store, page, onClose, onDone, edit
   const [bring, setBring] = useState<Bring>(() => (nComments > 0 ? "comments" : circles.length > 0 ? "circles" : "page"));
   const [copyId] = useState(() => newId());
   const [busy, setBusy] = useState(false);
+
+  // The page was deleted (on the other device): close and say why — but not while a try is out (it may yet succeed).
+  const gone = !livePage;
+  useEffect(() => {
+    if (!gone || busy) return;
+    onClose();
+    // an earlier try may have made the copy after all (its reply was lost)
+    const made = store.getState().pageById.get(copyId);
+    notify(
+      made
+        ? `That page was deleted on another device. Its copy “${made.label}” is in the page list, without circles.`
+        : "That page was deleted on another device, so it wasn't duplicated.",
+      "info",
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gone, busy]);
   const [error, setError] = useState<string | null>(null);
   const labelId = useId();
   const labelRef = useRef<HTMLInputElement>(null);
