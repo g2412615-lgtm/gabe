@@ -84,7 +84,7 @@ export const api = {
   /** Render status of every page in a plan (polled while pages are being prepared). */
   getPages: (planId: string) => request<{ pages: PageRow[] }>("GET", `/api/plans/${encodeURIComponent(planId)}/pages`),
   retryPage: (pageId: string) => request<{ page: PageRow }>("POST", `/api/pages/${encodeURIComponent(pageId)}/retry`, {}),
-  duplicatePage: (pageId: string, body: { label?: string }) =>
+  duplicatePage: (pageId: string, body: { id?: string; label?: string }) =>
     request<DuplicatePageResponse>("POST", `/api/pages/${encodeURIComponent(pageId)}/duplicate`, body),
   sync: (planId: string, body: SyncRequest, opts: { keepalive?: boolean } = {}) =>
     request<SyncResponse>("POST", `/api/plans/${encodeURIComponent(planId)}/sync`, body, opts),

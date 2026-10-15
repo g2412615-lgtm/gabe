@@ -8,7 +8,11 @@ export function copyLabel(label: string, taken: Iterable<string>, max: number): 
   const base = label.replace(/ \(copy(?: \d+)?\)$/, "") || label;
   for (let n = 1; ; n++) {
     const suffix = n === 1 ? " (copy)" : ` (copy ${n})`;
-    const name = `${base.slice(0, Math.max(0, max - suffix.length)).trimEnd()}${suffix}`;
+    let cut = base.slice(0, Math.max(0, max - suffix.length));
+    // never half an emoji: drop a high surrogate left without its pair
+    const last = cut.charCodeAt(cut.length - 1);
+    if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+    const name = `${cut.trimEnd()}${suffix}`;
     if (!used.has(name) || n > 999) return name;
   }
 }

@@ -159,6 +159,44 @@ describe("duplicating a page that isn't ready", () => {
   });
 });
 
+describe("a retry with the same id (the reply was lost)", () => {
+  it("gets the copy the first try made — never a second one", async () => {
+    const id = "copy-retry-0001";
+    const first = await duplicate(original[0].id, { id, label: "Retry copy" });
+    expect(first.status).toBe(201);
+    expect(first.json.page.id).toBe(id);
+    const count = live(await pagesOf()).length;
+    const again = await duplicate(original[0].id, { id, label: "Retry copy" });
+    expect(again.status).toBe(200);
+    expect(again.json.page).toEqual(first.json.page);
+    expect(live(await pagesOf())).toHaveLength(count);
+    expect((await fetchAsset(`/api/pages/${id}/${first.json.page.assetKey}/preview.webp`)).status).toBe(200);
+  });
+
+  it("refuses an id that belongs to another page (or to the original itself), and a copy deleted meanwhile", async () => {
+    expect((await duplicate(original[0].id, { id: original[0].id })).status).toBe(409);
+    expect((await duplicate(original[0].id, { id: original[3].id })).status).toBe(409);
+    const made = (await duplicate(original[0].id, { id: "copy-retry-0002" })).json.page;
+    server.db.prepare("UPDATE pages SET deleted_at = ? WHERE id = ?").run(Date.now(), made.id);
+    const r = await duplicate(original[0].id, { id: made.id });
+    expect(r.status).toBe(409);
+    expect((r.json as unknown as { error: string }).error).toMatch(/deleted in the meantime/);
+    // nothing of the refused ids' pages was touched
+    expect((await fetchAsset(`/api/pages/${original[0].id}/${original[0].assetKey}/preview.webp`)).status).toBe(200);
+  });
+
+  it("clears a folder left for the id by a try cut off by a crash", async () => {
+    const id = "copy-retry-0003";
+    const stale = path.join(server.dataDir, "assets", id, "old-key");
+    fs.mkdirSync(stale, { recursive: true });
+    fs.writeFileSync(path.join(stale, "junk.bin"), "x");
+    const r = await duplicate(original[0].id, { id });
+    expect(r.status).toBe(201);
+    expect(fs.existsSync(stale)).toBe(false);
+    expect(fs.readdirSync(path.join(server.dataDir, "assets", id))).toEqual([r.json.page.assetKey]);
+  });
+});
+
 describe("refusing", () => {
   it("a page that doesn't exist, was deleted, or is in a deleted plan", async () => {
     expect((await duplicate("no-such-page")).status).toBe(404);
@@ -187,6 +225,14 @@ describe("copyLabel", () => {
     expect(copyLabel("A-101 (copy)", ["A-101", "A-101 (copy)"], 200)).toBe("A-101 (copy 2)");
     expect(copyLabel("A-101 (copy 2)", ["A-101", "A-101 (copy)", "A-101 (copy 2)"], 200)).toBe("A-101 (copy 3)");
   });
+  it("never cuts an emoji in half at the length limit", () => {
+    const label = "x".repeat(192) + "🎪🎪🎪🎪"; // 200 units: the cut falls inside an emoji
+    const name = copyLabel(label, [label], 200);
+    expect(name.length).toBeLessThanOrEqual(200);
+    expect(name).toMatch(/^x{192}🎪* \(copy\)$/u);
+    expect(/[\ud800-\udbff](?![\udc00-\udfff])/.test(name)).toBe(false);
+  });
+
   it("stays within the length limit", () => {
     const long = "x".repeat(200);
     const name = copyLabel(long, [long], 200);

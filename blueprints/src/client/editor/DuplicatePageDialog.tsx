@@ -3,12 +3,16 @@
 // comments. The server makes the page (the image is shared, so it's
 // instant for a page that's ready); the circles are copied here, from what
 // this device shows. The whole duplicate is one undo step.
+//
+// The dialog picks the copy's id when it opens and sends it with every
+// try: when a reply is lost (venue Wi-Fi), trying again gets the copy the
+// first try made, and its circles go onto it — never a second copy.
 
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { MAX_LABEL_CHARS } from "../../shared/constants";
 import { copyLabel } from "../../shared/labels";
 import type { CircleRow, PageRow } from "../../shared/types";
-import { api, ApiError } from "../api";
+import { api, ApiError, newId } from "../api";
 import Dialog from "../ui/Dialog";
 import { useCoarsePointer } from "../ui/media";
 import Spinner from "../ui/Spinner";
@@ -42,6 +46,7 @@ export default function DuplicatePageDialog({ store, page, onClose, onDone, edit
   const [label, setLabel] = useState(() => copyLabel(page.label, pages.map((p) => p.label), MAX_LABEL_CHARS));
   // a duplicate is a copy of everything unless the owner says otherwise
   const [bring, setBring] = useState<Bring>(() => (nComments > 0 ? "comments" : circles.length > 0 ? "circles" : "page"));
+  const [copyId] = useState(() => newId());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const labelId = useId();
@@ -61,7 +66,8 @@ export default function DuplicatePageDialog({ store, page, onClose, onDone, edit
     try {
       // pending page changes first (a move, say), so the copy lands where this device shows the original
       await store.flushNow();
-      const res = await api.duplicatePage(page.id, { label });
+      if (!editorAlive()) return; // left meanwhile: make nothing
+      const res = await api.duplicatePage(page.id, { id: copyId, label });
       if (!editorAlive()) return; // left while it was being made: the page is there next time, without the circles
       store.addDuplicatedPage(res.pages, res.page.id, copies);
       onClose();
@@ -73,9 +79,23 @@ export default function DuplicatePageDialog({ store, page, onClose, onDone, edit
         "ok",
       );
     } catch (err) {
+      if (!editorAlive()) return;
       setBusy(false);
-      const why = err instanceof ApiError && err.status !== 0 && err.message ? err.message : "Check the connection and try again.";
+      const status = err instanceof ApiError ? err.status : 0;
+      const why = status !== 0 && err instanceof Error && err.message ? err.message : "Check the connection and try again.";
       setError(`The page wasn't duplicated. ${why}`);
+      // the page may be gone (404), or the copy may have been made after all: let the page list catch up
+      void store.pull();
+      // focus went to <body> while the form was disabled: back to the name, so Enter tries again
+      if (!coarse) requestAnimationFrame(() => labelRef.current?.focus());
+    }
+  };
+
+  // On a touch screen the keyboard's "done" key closes the keyboard (the choices are still to make); with a keyboard Enter duplicates.
+  const onNameKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (coarse && e.key === "Enter" && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      e.currentTarget.blur();
     }
   };
 
@@ -119,6 +139,7 @@ export default function DuplicatePageDialog({ store, page, onClose, onDone, edit
             enterKeyHint="done"
             disabled={busy}
             onChange={(e) => setLabel(e.target.value)}
+            onKeyDown={onNameKey}
           />
         </div>
         {options.length > 1 && (

@@ -11,6 +11,10 @@
 // Circles and comments are copied by the device afterwards
 // (store.addDuplicatedPage), from what the owner sees there — unsaved
 // changes included — and undoing the duplicate is one step there.
+//
+// The device may name the copy's id (one per Duplicate dialog). A retry
+// after a lost reply then gets the copy the first try made, instead of a
+// second one without its circles.
 
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -20,7 +24,7 @@ import { copyLabel } from "../shared/labels";
 import { comparePages } from "../shared/order";
 import type { PageRow } from "../shared/types";
 import { tx, type Db } from "./db";
-import { cleanName, HttpError, MSG } from "./http";
+import { cleanName, HttpError, isId, MSG } from "./http";
 import { newAssetKey } from "./render/queue";
 import { getPage, getPlan, pagesOfPlan } from "./repo";
 
@@ -30,17 +34,38 @@ export interface DuplicateResult {
   pages: PageRow[];
   /** The copy waits for a render (the original wasn't ready). */
   queued: boolean;
+  /** False when the copy already existed (a retry with the same id). */
+  created: boolean;
 }
 
-export function duplicatePage(db: Db, dataDir: string, pageId: string, wantedLabel: unknown): DuplicateResult {
+export const COPY_GONE = "That copy was deleted in the meantime. Close this and duplicate the page again.";
+
+export function duplicatePage(db: Db, dataDir: string, pageId: string, opts: { label?: unknown; id?: unknown } = {}): DuplicateResult {
   const source = livePage(db, pageId);
-  const id = randomUUID();
+  const wantedId = isId(opts.id) ? opts.id : null;
+  if (wantedId) {
+    const existing = getPage(db, wantedId);
+    if (existing) {
+      // made by an earlier try of this same duplicate: hand it back (anything else with this id isn't ours to return)
+      const same =
+        existing.id !== source.id &&
+        existing.planId === source.planId &&
+        existing.sourceId === source.sourceId &&
+        existing.sourceIndex === source.sourceIndex;
+      if (!same || existing.deletedAt !== null) throw new HttpError(409, COPY_GONE);
+      return { page: existing, pages: pagesOfPlan(db, existing.planId), queued: false, created: false };
+    }
+  }
+  const id = wantedId ?? randomUUID();
+  const wantedLabel = opts.label;
   const fromDir = path.join(dataDir, "assets", source.id, source.assetKey);
   const ready = source.status === "ready" && fs.existsSync(fromDir);
   const pageDir = path.join(dataDir, "assets", id);
 
   // The images first: the page row must never point at files that aren't there.
   if (ready) {
+    // no page has this id: anything in its folder is left from a try cut off by a crash
+    fs.rmSync(pageDir, { recursive: true, force: true });
     try {
       linkTree(fromDir, path.join(pageDir, source.assetKey));
     } catch (e) {
@@ -93,7 +118,7 @@ export function duplicatePage(db: Db, dataDir: string, pageId: string, wantedLab
       db.prepare("UPDATE plans SET updated_at = ? WHERE id = ?").run(now, src.planId);
       return getPage(db, id) as PageRow;
     });
-    return { page, pages: pagesOfPlan(db, page.planId), queued: !ready };
+    return { page, pages: pagesOfPlan(db, page.planId), queued: !ready, created: true };
   } catch (e) {
     fs.rmSync(pageDir, { recursive: true, force: true });
     throw e;

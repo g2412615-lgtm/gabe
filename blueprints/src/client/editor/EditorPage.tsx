@@ -419,6 +419,12 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   const closeCopy = useCallback(() => setCopyReq(null), []);
   const duplicatePage = useCallback((id: string) => setDupPageId(id), []);
   const closeDuplicate = useCallback(() => setDupPageId(null), []);
+  // its page was deleted (on the other device): the dialog goes, and says why — and can't come back by itself
+  useEffect(() => {
+    if (!dupPageId || pageById.has(dupPageId)) return;
+    setDupPageId(null);
+    notify("That page was deleted on another device, so it wasn't duplicated.", "info");
+  }, [dupPageId, pageById]);
   // a toast's "Show" opens a page in this editor: once it's closed the button would do nothing, so the toast goes too
   const editorToasts = useRef(new Set<number>());
   const trackEditorToast = useCallback((id: number) => void editorToasts.current.add(id), []);
