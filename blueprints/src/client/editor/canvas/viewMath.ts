@@ -34,11 +34,23 @@ export function scaleLimits(page: PageDims, size: Size): { min: number; max: num
  */
 export function usableArea(size: Size, insets: Insets) {
   const right = size.w - insets.right < size.w * 0.4 ? 0 : Math.max(0, insets.right);
-  let top = Math.max(0, insets.top);
-  let bottom = Math.max(0, insets.bottom ?? 0);
-  if (size.h - top - bottom < size.h * 0.4) bottom = 0;
-  if (size.h - top - bottom < size.h * 0.4) top = 0;
+  const { top, bottom } = verticalInsets(size.h, insets, size.h * 0.4);
   return { x: 0, y: top, w: Math.max(1, size.w - right), h: Math.max(1, size.h - top - bottom) };
+}
+
+/**
+ * The top and bottom insets, keeping at least `min` px between them. When
+ * both can't stay, the top one (the small "circles hidden" chip) gives way
+ * before the bottom one (the phone's comment sheet, far bigger); when even
+ * the sheet alone leaves too little, it's ignored and the top one stays if
+ * it fits.
+ */
+function verticalInsets(h: number, insets: Insets, min: number) {
+  const top = Math.max(0, insets.top);
+  const bottom = Math.max(0, insets.bottom ?? 0);
+  if (h - top - bottom >= min) return { top, bottom };
+  if (h - bottom >= min) return { top: 0, bottom };
+  return { top: h - top >= min ? top : 0, bottom: 0 };
 }
 
 /** Below this many px an inset is ignored even for focus/reveal: the stage is too small for it to mean anything. */
@@ -53,10 +65,7 @@ export function visibleArea(size: Size, insets: Insets) {
   const w = Math.max(1, size.w);
   const h = Math.max(1, size.h);
   const right = w - insets.right >= MIN_VISIBLE ? Math.max(0, insets.right) : 0;
-  let top = Math.max(0, insets.top);
-  let bottom = Math.max(0, insets.bottom ?? 0);
-  if (h - top - bottom < MIN_VISIBLE) bottom = 0;
-  if (h - top - bottom < MIN_VISIBLE) top = 0;
+  const { top, bottom } = verticalInsets(h, insets, MIN_VISIBLE);
   return { x: 0, y: top, w: Math.max(1, w - right), h: Math.max(1, h - top - bottom) };
 }
 

@@ -14,6 +14,11 @@ export function toPlan(r: Raw): PlanRow {
   return {
     id: str(r.id),
     name: str(r.name),
+    legendGold: str(r.legend_gold),
+    legendBlack: str(r.legend_black),
+    legendRed: str(r.legend_red),
+    legendBlue: str(r.legend_blue),
+    legendGreen: str(r.legend_green),
     createdAt: num(r.created_at),
     updatedAt: num(r.updated_at),
     deletedAt: nullableNum(r.deleted_at),

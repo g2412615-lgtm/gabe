@@ -112,6 +112,8 @@ export interface PlanStore {
   deletePage(id: string): void;
   restorePage(id: string): void;
   renamePlan(name: string): void;
+  /** What a circle colour means in this plan ("" = not assigned). Typing one label is one undo step. */
+  setColorLabel(color: CircleColor, label: string): void;
   /** Server page rows from uploads/polling (server-owned fields always win; new pages appear). */
   mergePages(pages: PageRow[]): void;
   /** GET /pages and merge (used while rendering). */

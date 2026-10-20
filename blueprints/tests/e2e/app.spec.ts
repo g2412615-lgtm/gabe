@@ -644,6 +644,111 @@ test.describe("the editor", () => {
     await page.unroute("**/api/pages/*/duplicate");
   });
 
+  test("colors: label them (saved with the plan), hide and show them (this device only), nothing in the plan changes", async ({ page }, info) => {
+    const { planId } = await freshPlan(page, info, "Colors");
+    const ed = editor(page);
+    const closePanel = ed.panel.getByRole("button", { name: "Close the panel" });
+
+    // a gold circle (the default) and a red one
+    const gold = await addCircleAt(page, info, planId, await sheetPoint(page, 0.3, 0.38));
+    await press(closePanel, info);
+    await addCircleAt(page, info, planId, await sheetPoint(page, 0.62, 0.5));
+    await press(ed.panel.getByRole("button", { name: /^Red/ }), info);
+    await press(closePanel, info);
+    await expectSaved(page);
+    const before = await getPlan(page, planId);
+    expect(before.plan).toMatchObject({ legendGreen: "General notes", legendRed: "" });
+
+    // ── labels ──
+    const colors = page.getByRole("button", { name: /^Colors/ });
+    const panel = page.getByRole("dialog", { name: /^Colors/ });
+    await press(colors, info);
+    await expect(panel.getByLabel("Green label")).toHaveValue("General notes");
+    await expect(panel.getByLabel("Red label")).toHaveValue("");
+    await panel.getByLabel("Red label").fill("Security");
+    await expectSaved(page);
+    await expect.poll(async () => (await getPlan(page, planId)).plan.legendRed).toBe("Security");
+
+    // ── hide gold: its circle goes from the blueprint and the Notes list, and the map says so ──
+    await press(panel.getByLabel("Show gold circles"), info);
+    await expect(ed.circles).toHaveCount(1);
+    await expect(colors).toContainText("1 hidden");
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+    const chip = page.locator(".ed-filter-chip");
+    await expect(chip).toContainText("1 circle hidden");
+    await press(ed.sidebar.getByRole("tab", { name: /Notes/ }), info);
+    await expect(ed.sidebar.getByText("1 circle isn't listed: its color is hidden.")).toBeVisible();
+    await expect(ed.sidebar.locator(".nl-row")).toHaveCount(1);
+
+    // the red circle's panel shows what red means here
+    await pressAt(page, await sheetPoint(page, 0.62, 0.5), info);
+    await expect(ed.panel).toBeVisible();
+    await expect(ed.panel.locator(".cp-legend")).toHaveText("Red Security");
+    await expect(ed.panel.getByRole("button", { name: "Red: Security" })).toHaveAttribute("aria-pressed", "true");
+    await press(closePanel, info);
+
+    // still hidden after a reload (this device remembers), and nothing in the plan changed
+    await page.reload();
+    await waitCanvas(page);
+    await expect(ed.circles).toHaveCount(1);
+    await expect(chip).toBeVisible();
+    const after = await getPlan(page, planId);
+    expect(liveCircles(after).map((c) => [c.id, c.color, c.x, c.y, c.r]).sort()).toEqual(liveCircles(before).map((c) => [c.id, c.color, c.x, c.y, c.r]).sort());
+    expect(after.plan.legendRed).toBe("Security");
+
+    // ── a new circle comes in gold: gold shows again, and it says so ──
+    await press(ed.circleMode, info);
+    // the add-mode hint sits below the hidden-colours chip, not under it
+    const hint = await page.locator(".bp-hint").boundingBox();
+    const chipBox = await chip.boundingBox();
+    expect(hint!.y).toBeGreaterThanOrEqual(chipBox!.y + chipBox!.height);
+    await pressAt(page, await sheetPoint(page, 0.45, 0.7), info);
+    await expect(ed.toast("Showing gold circles again.")).toBeVisible();
+    await expect(ed.circles).toHaveCount(3);
+    await expect(chip).toBeHidden();
+    await press(closePanel, info);
+
+    // ── Only, then Show all from the map ──
+    await press(colors, info);
+    if (!isTouch(info)) {
+      // opened with the mouse, Tab goes into the panel (it doesn't close it)
+      await page.keyboard.press("Tab");
+      await expect(panel).toBeVisible();
+      await expect(panel.getByLabel("Show gold circles")).toBeFocused(); // "Show all" is off: nothing is hidden
+    }
+    await press(panel.getByRole("button", { name: "Show only red circles" }), info);
+    await expect(ed.circles).toHaveCount(1);
+    await expect(colors).toContainText("4 hidden");
+    await page.keyboard.press("Escape");
+    await press(chip.getByRole("button", { name: "Show all" }), info);
+    await expect(ed.circles).toHaveCount(3);
+    await expect(chip).toBeHidden();
+
+    // ── narrow screens: two header rows (name, Colors, save, help; then pages and tools) that hiding a colour doesn't change ──
+    const undo = page.getByRole("button", { name: "Undo" });
+    const yOf = async (l: typeof colors) => (await l.boundingBox())!.y;
+    const stageTop = () => yOf(page.locator(".ed-stage"));
+    for (const width of [390, 700]) {
+      await page.setViewportSize({ width, height: 844 });
+      const top = await stageTop();
+      expect(Math.abs((await yOf(undo)) - (await yOf(ed.moveMode)))).toBeLessThan(12); // undo/redo on the tools' row
+      expect(await yOf(colors)).toBeLessThan((await yOf(ed.moveMode)) - 20); // Colors on the top row
+      expect((await page.locator(".ed-title").boundingBox())!.width).toBeGreaterThanOrEqual(100); // the plan name keeps its room
+      await press(colors, info);
+      const box = (await panel.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      await press(panel.getByRole("button", { name: "Show only red circles" }), info);
+      await page.keyboard.press("Escape");
+      await expect(chip).toBeVisible();
+      expect(await stageTop()).toBe(top); // the header didn't grow
+      await press(chip.getByRole("button", { name: "Show all" }), info);
+      await expect(chip).toBeHidden();
+    }
+    void gold;
+  });
+
   test("add pages from a second PDF, delete one page; home shows the counts", async ({ page }, info) => {
     const { planId } = await freshPlan(page, info, "Add + delete pages");
     const ed = editor(page);
