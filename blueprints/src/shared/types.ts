@@ -216,6 +216,22 @@ export interface DuplicatePageResponse {
   pages: PageRow[];
 }
 
+/**
+ * POST /api/plans/:id/export: a PDF of these pages with their circles drawn
+ * on (and, with `notes`, a notes page after each page with circles). The
+ * reply is the PDF itself (application/pdf, Content-Disposition attachment).
+ */
+export interface ExportPdfRequest {
+  /** The pages to include (they come out in the plan's page order). */
+  pageIds: string[];
+  /** Only circles of these colours; absent: every colour. */
+  colors?: CircleColor[];
+  /** A notes page after each page with circles: number, colour, title and comments. */
+  notes: boolean;
+  /** The device's time zone (IANA name), for the comments' dates; absent or unknown: UTC. */
+  timeZone?: string;
+}
+
 export interface ApiError {
   error: string;
 }

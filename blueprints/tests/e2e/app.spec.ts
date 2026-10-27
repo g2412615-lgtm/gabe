@@ -2,7 +2,10 @@
 // (mouse) and an iPad-sized touch screen (finger): see playwright.config.ts.
 // Each test makes its own event plan, so they don't depend on each other.
 
-import type { Page, TestInfo } from "@playwright/test";
+import fs from "node:fs";
+import type { Download, Page, TestInfo } from "@playwright/test";
+import * as mupdf from "mupdf";
+import { pdfFileName } from "../../src/shared/labels";
 import {
   centreOf,
   dragFromTo,
@@ -747,6 +750,119 @@ test.describe("the editor", () => {
       await expect(chip).toBeHidden();
     }
     void gold;
+  });
+
+  test("download PDF: the pages with their circles and a notes page, changes not yet saved included; one page from its menu", async ({ page }, info) => {
+    const { planId, name } = await freshPlan(page, info, "Download PDF");
+    const ed = editor(page);
+    const closePanel = ed.panel.getByRole("button", { name: "Close the panel" });
+    await addCircleAt(page, info, planId, await sheetPoint(page, 0.3, 0.4));
+    await press(ed.panel.getByRole("button", { name: /^Red/ }), info);
+    // written and downloaded at once: the dialog saves it first
+    await writeComment(page, info, "Two scanners at doors open.");
+
+    const dialog = page.getByRole("dialog", { name: "Download PDF" });
+    /** Download, then the PDF as mupdf reads it. A touch screen gets the file with a second tap (Save PDF). */
+    const fetchPdf = async (fileName: string) => {
+      let download: Download;
+      if (isTouch(info)) {
+        await press(dialog.getByRole("button", { name: "Download PDF" }), info);
+        await expect(dialog.getByRole("status")).toContainText("is ready");
+        [download] = await Promise.all([page.waitForEvent("download"), press(dialog.getByRole("button", { name: "Save PDF" }), info)]);
+      } else {
+        [download] = await Promise.all([page.waitForEvent("download"), press(dialog.getByRole("button", { name: "Download PDF" }), info)]);
+        await expect(dialog.getByRole("status")).toContainText("is ready");
+      }
+      expect(download.suggestedFilename()).toBe(fileName);
+      const bytes = fs.readFileSync((await download.path())!);
+      expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+      return new mupdf.PDFDocument(bytes);
+    };
+    const textOf = (doc: mupdf.PDFDocument, i: number) => doc.loadPage(i).toStructuredText("preserve-whitespace").asText();
+
+    // ── the whole plan, from under the page list ──
+    await press(ed.sidebar.getByRole("button", { name: /Download PDF/ }), info);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("checkbox", { checked: true })).toHaveCount(5); // 4 pages + "notes"
+    await expect(dialog.getByText("4 pages with 1 circle.")).toBeVisible();
+    const all = await fetchPdf(pdfFileName(name));
+    expect(all.countPages()).toBe(5); // A-101, its notes, P-1, C-201, R-1
+    expect(all.loadPage(1).getLabel()).toBe("A-101 notes 1");
+    const notes = textOf(all, 1);
+    expect(notes).toContain(name);
+    expect(notes).toContain("Red");
+    expect(notes).toContain("Two scanners at doors open.");
+    // a computer has the file already, so Done is the button to press; on a touch screen it's Save PDF (Done is the quiet one)
+    const next = dialog.getByRole("button", { name: isTouch(info) ? "Save PDF" : "Done" });
+    await expect(next).toHaveClass(/\bprimary\b/);
+    await expect(next).toBeFocused();
+    await press(dialog.getByRole("button", { name: "Done" }), info);
+    await expect(dialog).toBeHidden();
+
+    // ── one page, from its ⋯ menu, without notes ──
+    await press(closePanel, info);
+    if (!isTouch(info)) await ed.pageButton("P-1").hover();
+    await press(ed.pageMenu("P-1"), info);
+    await press(page.getByRole("menuitem", { name: "Download as PDF…" }), info);
+    await expect(dialog.getByText("1 page with 0 circles.")).toBeVisible();
+    await press(dialog.getByRole("checkbox", { name: /notes page/ }), info);
+    const one = await fetchPdf(pdfFileName(name, "P-1"));
+    expect(one.countPages()).toBe(1);
+    expect(one.loadPage(0).getLabel()).toBe("P-1");
+    await press(dialog.getByRole("button", { name: "Done" }), info);
+
+    // ── the server can't make it: the dialog says so, and (keyboard) Download PDF has focus again to retry ──
+    await page.route("**/api/plans/*/export", (route) =>
+      route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "The PDF couldn't be made. Try again; if it keeps failing, choose fewer pages." }) }),
+    );
+    await press(ed.sidebar.getByRole("button", { name: /Download PDF/ }), info);
+    await press(dialog.getByRole("button", { name: "Download PDF" }), info);
+    await expect(dialog.getByRole("alert")).toContainText("The PDF wasn't made. The PDF couldn't be made.");
+    if (!isTouch(info)) await expect(dialog.getByRole("button", { name: "Download PDF" })).toBeFocused();
+    await page.unroute("**/api/plans/*/export");
+
+    // ── where the device can share files (an iPad's share sheet: Save to Files, Mail, AirDrop), Share… is offered ──
+    await page.evaluate(() => {
+      const w = window as unknown as { shared?: string[] };
+      w.shared = [];
+      Object.assign(navigator, {
+        canShare: (d: { files?: File[] }) => Boolean(d.files?.length),
+        share: async (d: { files: File[] }) => void w.shared!.push(`${d.files[0].name} ${d.files[0].type} ${d.files[0].size > 1000}`),
+      });
+    });
+    await press(dialog.getByRole("button", { name: "Download PDF" }), info);
+    const shareBtn = dialog.getByRole("button", { name: "Share…" });
+    await expect(shareBtn).toBeVisible();
+    if (isTouch(info)) {
+      await expect(shareBtn).toHaveClass(/\bprimary\b/);
+      await expect(shareBtn).toBeFocused();
+    }
+    await press(shareBtn, info);
+    expect(await page.evaluate(() => (window as unknown as { shared: string[] }).shared)).toEqual([`${pdfFileName(name)} application/pdf true`]);
+    await press(dialog.getByRole("button", { name: "Done" }), info);
+    await expect(dialog).toBeHidden();
+
+    // ── closed while it's still saving the latest change: no PDF is made ──
+    let exports = 0;
+    page.on("request", (r) => {
+      if (r.url().endsWith("/export")) exports++;
+    });
+    await addCircleAt(page, info, planId, await sheetPoint(page, 0.6, 0.6));
+    // the next change takes a while to save (venue Wi-Fi)
+    await page.route("**/api/plans/*/sync", async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+    await press(ed.panel.getByRole("button", { name: /^Blue/ }), info);
+    await press(ed.sidebar.getByRole("button", { name: /Download PDF/ }), info);
+    await press(dialog.getByRole("button", { name: "Download PDF" }), info);
+    await press(dialog.getByRole("button", { name: "Cancel" }), info);
+    await expect(dialog).toBeHidden();
+    await page.unroute("**/api/plans/*/sync");
+    await expectSaved(page);
+    await page.waitForTimeout(500);
+    expect(exports).toBe(0);
+    expect(liveCircles(await getPlan(page, planId)).map((c) => c.color).sort()).toEqual(["blue", "red"]); // the change was saved all the same
   });
 
   test("add pages from a second PDF, delete one page; home shows the counts", async ({ page }, info) => {

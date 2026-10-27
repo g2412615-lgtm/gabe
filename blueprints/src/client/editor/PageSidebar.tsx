@@ -2,9 +2,10 @@
 //
 //  - Pages: a thumbnail per page with its label, circle count and render
 //    status; a ⋯ menu to rename, reorder, duplicate, copy its circles to
-//    another page and delete; "Add pages" uploads more files into the plan, with a
-//    progress row per file.
+//    another page, download it as a PDF and delete; "Add pages" uploads more
+//    files into the plan, with a progress row per file.
 //  - Notes: NotesList.
+//  - Under either: "Download PDF" (the pages with their circles and notes).
 //
 // On a wide screen it sits beside the blueprint and collapses to a 56 px
 // rail of page numbers; below 900 px it's a drawer over the blueprint that
@@ -20,7 +21,7 @@ import InlineRename from "../ui/InlineRename";
 import Menu from "../ui/Menu";
 import Progress from "../ui/Progress";
 import Spinner from "../ui/Spinner";
-import { IconChevron, IconCopy, IconEdit, IconFilePlus, IconLayers, IconList, IconMore, IconSidebar, IconTrash, IconUpload, IconX } from "../ui/icons";
+import { IconChevron, IconCopy, IconDownload, IconEdit, IconFilePlus, IconLayers, IconList, IconMore, IconSidebar, IconTrash, IconUpload, IconX } from "../ui/icons";
 import { usePlanState, type PlanStore } from "../sync";
 import { deletePageWithUndo, retryPage } from "./actions";
 import { plural } from "./format";
@@ -50,6 +51,8 @@ export interface PageSidebarProps {
   onCopyCircles(pageId: string): void;
   /** Open the Duplicate page dialog. */
   onDuplicatePage(pageId: string): void;
+  /** Open the Download PDF dialog: with just this page ticked, or (null) every page. */
+  onDownloadPdf(pageId: string | null): void;
   /** Circle colours hidden on this device: the Notes list leaves them out too. */
   hiddenColors: ReadonlySet<CircleColor>;
   onShowAllColors(): void;
@@ -156,6 +159,7 @@ function PageSidebar(p: PageSidebarProps) {
                   onOpen={p.onOpenPage}
                   onCopy={p.onCopyCircles}
                   onDuplicate={p.onDuplicatePage}
+                  onDownload={p.onDownloadPdf}
                 />
               ))}
             </ol>
@@ -174,22 +178,30 @@ function PageSidebar(p: PageSidebarProps) {
         )}
       </div>
 
-      {p.tab === "pages" && (
-        <div className="ps-foot">
-          {p.uploads.items.map((it) => (
-            <UploadRow key={it.id} item={it} onCancel={() => p.uploads.cancel(it.id)} />
-          ))}
-          <Dropzone
-            compact
-            multiple
-            onFiles={p.uploads.addFiles}
-            icon={<IconUpload size={16} />}
-            title="Add pages"
-            hint="PDF, PNG or JPG"
-            className="ps-add"
-          />
-        </div>
-      )}
+      <div className="ps-foot">
+        {p.tab === "pages" && (
+          <>
+            {p.uploads.items.map((it) => (
+              <UploadRow key={it.id} item={it} onCancel={() => p.uploads.cancel(it.id)} />
+            ))}
+            <Dropzone
+              compact
+              multiple
+              onFiles={p.uploads.addFiles}
+              icon={<IconUpload size={16} />}
+              title="Add pages"
+              hint="PDF, PNG or JPG"
+              className="ps-add"
+            />
+          </>
+        )}
+        {pages.length > 0 && (
+          <button type="button" className="ps-download" onClick={() => p.onDownloadPdf(null)} title="The pages with their circles and notes, as a PDF">
+            <IconDownload size={15} />
+            Download PDF
+          </button>
+        )}
+      </div>
     </aside>
   );
 }
@@ -208,9 +220,10 @@ interface PageItemProps {
   onOpen(id: string): void;
   onCopy(id: string): void;
   onDuplicate(id: string): void;
+  onDownload(id: string): void;
 }
 
-const PageItem = memo(function PageItem({ store, page, index, count, active, circles, onOpen, onCopy, onDuplicate }: PageItemProps) {
+const PageItem = memo(function PageItem({ store, page, index, count, active, circles, onOpen, onCopy, onDuplicate, onDownload }: PageItemProps) {
   const [renaming, setRenaming] = useState(false);
 
   const askDelete = async () => {
@@ -273,7 +286,7 @@ const PageItem = memo(function PageItem({ store, page, index, count, active, cir
         <Menu
           label={<IconMore size={16} />}
           ariaLabel={`More for “${page.label}”`}
-          title="Rename, move, duplicate, copy circles or delete"
+          title="Rename, move, duplicate, copy circles, download or delete"
           buttonClassName="ghost small icon-btn ps-more"
           align="right"
           items={[
@@ -302,6 +315,7 @@ const PageItem = memo(function PageItem({ store, page, index, count, active, cir
               disabled: circles.length === 0,
               onSelect: () => onCopy(page.id),
             },
+            { label: "Download as PDF…", icon: <IconDownload size={14} />, onSelect: () => onDownload(page.id) },
             "separator",
             { label: "Delete page…", icon: <IconTrash size={14} />, danger: true, onSelect: () => void askDelete() },
           ]}

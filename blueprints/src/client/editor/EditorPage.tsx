@@ -35,6 +35,7 @@ import { readHiddenColors, visibleCircles, writeHiddenColors } from "./colorFilt
 import { circleClipFor, copyOf, placeCopies, setCircleClip } from "./copyCircles";
 import { paperSwatch } from "./swatch";
 import CopyCirclesDialog, { type CopyRequest } from "./CopyCirclesDialog";
+import DownloadPdfDialog from "./DownloadPdfDialog";
 import DuplicatePageDialog from "./DuplicatePageDialog";
 import EditorHeader from "./EditorHeader";
 import PageSidebar, { type SidebarTab } from "./PageSidebar";
@@ -124,6 +125,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   const [copyReq, setCopyReq] = useState<(CopyRequest & { key: number }) | null>(null);
   /** The page the Duplicate page dialog is open for (as it was then: the dialog follows it, and notices when it's gone). */
   const [dupPage, setDupPage] = useState<PageRow | null>(null);
+  const [pdfReq, setPdfReq] = useState<{ pageIds: string[] | null; key: number } | null>(null);
   const narrow = useMediaQuery("(max-width: 899px)");
   const sheet = useMediaQuery("(max-width: 699px)");
 
@@ -464,12 +466,16 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
   const closeCopy = useCallback(() => setCopyReq(null), []);
   const duplicatePage = useCallback((id: string) => setDupPage(store.getState().pageById.get(id) ?? null), [store]);
   const closeDuplicate = useCallback(() => setDupPage(null), []);
+  const pdfSeq = useRef(0);
+  const downloadPdf = useCallback((pageId: string | null) => setPdfReq({ pageIds: pageId ? [pageId] : null, key: ++pdfSeq.current }), []);
+  const closePdf = useCallback(() => setPdfReq(null), []);
   // The plan went away (deleted on the other device): the dialogs go with the editor's content, for good —
   // not back by themselves if the plan is restored.
   useEffect(() => {
     if (!notFound) return;
     setDupPage(null);
     setCopyReq(null);
+    setPdfReq(null);
   }, [notFound]);
   // a toast's "Show" opens a page in this editor: once it's closed the button would do nothing, so the toast goes too
   const editorToasts = useRef(new Set<number>());
@@ -713,6 +719,7 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
           onLit={setNotesLit}
           onCopyCircles={copyPageCircles}
           onDuplicatePage={duplicatePage}
+          onDownloadPdf={downloadPdf}
           hiddenColors={hiddenColors}
           onShowAllColors={showAllColors}
           uploads={uploads}
@@ -794,6 +801,16 @@ export default function EditorPage({ planId, initialPageId, initialCircleId }: E
           page={dupPage}
           onClose={closeDuplicate}
           onDone={openPage}
+          editorAlive={editorAlive}
+        />
+      )}
+      {pdfReq && (
+        <DownloadPdfDialog
+          key={pdfReq.key}
+          store={store}
+          pageIds={pdfReq.pageIds}
+          hiddenColors={hiddenColors}
+          onClose={closePdf}
           editorAlive={editorAlive}
         />
       )}

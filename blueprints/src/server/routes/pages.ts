@@ -7,7 +7,7 @@ import path from "node:path";
 import { Hono, type Context } from "hono";
 import type { AppDeps } from "../context";
 import { duplicatePage } from "../duplicate";
-import { HttpError, idParam, isId, isRecord, MSG, readJson } from "../http";
+import { contentDisposition, HttpError, idParam, isId, isRecord, MSG, readJson } from "../http";
 import { newAssetKey } from "../render/queue";
 import { getPage, getPlan, getSource } from "../repo";
 import { fileStream } from "../static";
@@ -103,7 +103,7 @@ export function pageRoutes(deps: AppDeps) {
     const headers = {
       "Content-Type": type,
       "Content-Length": String(size),
-      "Content-Disposition": contentDisposition(source.originalName, source.ext),
+      "Content-Disposition": contentDisposition(originalName(source.originalName, source.ext)),
       "X-Content-Type-Options": "nosniff",
       "Cache-Control": "private, no-store",
     };
@@ -115,8 +115,6 @@ export function pageRoutes(deps: AppDeps) {
 }
 
 /** attachment; filename="ascii fallback"; filename*=UTF-8''<the real name> (RFC 6266 / 5987). */
-function contentDisposition(name: string, ext: string): string {
-  const wanted = name.toLowerCase().endsWith(`.${ext}`) || (ext === "jpg" && /\.jpe?g$/i.test(name)) ? name : `${name}.${ext}`;
-  const ascii = wanted.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(wanted)}`;
+function originalName(name: string, ext: string): string {
+  return name.toLowerCase().endsWith(`.${ext}`) || (ext === "jpg" && /\.jpe?g$/i.test(name)) ? name : `${name}.${ext}`;
 }

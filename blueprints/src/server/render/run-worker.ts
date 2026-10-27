@@ -22,6 +22,8 @@ import type { FinalMessage, WorkerMessage, WorkerTask } from "./protocol";
  * into dist/server/index.js and the worker is dist/server/render-worker.js.
  */
 export const WORKER_FILE = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./render-worker.js", import.meta.url));
+/** The "Download PDF" worker, likewise (export-worker.ts / dist/server/export-worker.js). */
+export const EXPORT_WORKER_FILE = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./export-worker.ts" : "./export-worker.js", import.meta.url));
 
 /**
  * Node flags for the worker. Chosen here rather than inherited: the parent
@@ -69,7 +71,7 @@ export interface WorkerRun {
 }
 
 export function runWorker(task: WorkerTask, opts: { timeoutMs: number; onMessage?: (m: WorkerMessage) => void }): WorkerRun {
-  const child = fork(WORKER_FILE, [JSON.stringify(task)], {
+  const child = fork(task.task === "export" ? EXPORT_WORKER_FILE : WORKER_FILE, [JSON.stringify(task)], {
     execArgv: WORKER_EXEC_ARGV,
     // no stdin; the worker's stdout/stderr (crash traces) go to the server's log
     stdio: ["ignore", "inherit", "inherit", "ipc"],

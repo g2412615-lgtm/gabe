@@ -38,6 +38,7 @@ describe("auth", () => {
       expect(r.json.error).toBe("Sign in to continue.");
     }
     expect((await c.post("/api/plans/abc/sync", { ops: [] })).status).toBe(401);
+    expect((await c.post("/api/plans/abc/export", { pageIds: ["a"] })).status).toBe(401);
     expect((await c.post("/api/logout")).status).toBe(401);
     const h = await c.get("/api/health");
     expect(h.status).toBe(200);

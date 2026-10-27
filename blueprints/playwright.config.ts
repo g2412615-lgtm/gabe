@@ -41,7 +41,8 @@ export default defineConfig({
   outputDir: "test-results",
   use: {
     browserName: "chromium",
-    launchOptions: executablePath ? { executablePath } : {},
+    // a UTF-8 locale: without one Chromium names any download with a non-ASCII name "download"
+    launchOptions: { ...(executablePath ? { executablePath } : {}), env: { ...process.env, LANG: process.env.LANG || "C.UTF-8" } },
     actionTimeout: 15_000,
     navigationTimeout: 30_000,
     trace: "retain-on-failure",

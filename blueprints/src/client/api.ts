@@ -3,7 +3,7 @@
 // it as-is. A 401 means the session ended: callers decide what to do (the
 // editor keeps unsaved work on the device and offers to sign in again).
 
-import type { DuplicatePageResponse, PageRow, PlanDoc, PlanRow, PlanSummary, SyncRequest, SyncResponse, UploadResponse } from "../shared/types";
+import type { DuplicatePageResponse, ExportPdfRequest, PageRow, PlanDoc, PlanRow, PlanSummary, SyncRequest, SyncResponse, UploadResponse } from "../shared/types";
 
 export class ApiError extends Error {
   constructor(
@@ -55,17 +55,18 @@ async function errorFrom(res: Response): Promise<ApiError> {
   } catch {
     /* not JSON */
   }
-  if (!msg) {
-    msg =
-      res.status === 401
-        ? "You've been signed out — sign in again to keep working."
-        : res.status === 413
-          ? "That file is too large."
-          : res.status >= 500
-            ? "The server had a problem — try again in a moment."
-            : "That didn't work.";
-  }
-  return new ApiError(msg, res.status);
+  return new ApiError(msg || fallbackMessage(res.status), res.status);
+}
+
+/** What to say when the server's reply carries no `{ error }`. */
+function fallbackMessage(status: number): string {
+  return status === 401
+    ? "You've been signed out — sign in again to keep working."
+    : status === 413
+      ? "That file is too large."
+      : status >= 500
+        ? "The server had a problem — try again in a moment."
+        : "That didn't work.";
 }
 
 // ── auth ────────────────────────────────────────────────────────────────
@@ -150,6 +151,58 @@ export function uploadFile(
     xhr.onerror = () => reject(new ApiError("The upload stopped — check the connection and try again.", 0));
     xhr.onabort = () => reject(new ApiError("Upload cancelled.", 0));
     xhr.send(file);
+  });
+  return { promise, abort: () => xhr.abort() };
+}
+
+// ── Download PDF ────────────────────────────────────────────────────────
+
+export interface PdfDownload {
+  /** The PDF, once it has all arrived. */
+  promise: Promise<Blob>;
+  abort: () => void;
+}
+
+/**
+ * Ask the server for a PDF of an event plan's pages with their circles
+ * (POST /api/plans/:id/export) and download it here, with progress (XHR:
+ * a big plan on venue Wi-Fi takes a while). The server makes the whole PDF
+ * before it answers: `onReady` says it has started to arrive.
+ */
+export function downloadPlanPdf(
+  planId: string,
+  body: ExportPdfRequest,
+  on: { onReady?: () => void; onProgress?: (fraction: number) => void } = {},
+): PdfDownload {
+  const xhr = new XMLHttpRequest();
+  const promise = new Promise<Blob>((resolve, reject) => {
+    xhr.open("POST", `/api/plans/${encodeURIComponent(planId)}/export`);
+    xhr.responseType = "blob";
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.setRequestHeader("Accept", "application/pdf, application/json");
+    let ready = false;
+    xhr.onprogress = (e) => {
+      if (xhr.status !== 200) return;
+      if (!ready) {
+        ready = true;
+        on.onReady?.();
+      }
+      if (e.lengthComputable) on.onProgress?.(Math.min(1, e.loaded / Math.max(1, e.total)));
+    };
+    xhr.onload = async () => {
+      if (xhr.status === 200) return resolve(xhr.response as Blob);
+      let msg = "";
+      try {
+        const j = JSON.parse(await (xhr.response as Blob).text());
+        msg = typeof j?.error === "string" ? j.error : "";
+      } catch {
+        /* not JSON */
+      }
+      reject(new ApiError(msg || fallbackMessage(xhr.status), xhr.status));
+    };
+    xhr.onerror = () => reject(new ApiError("The download stopped — check the connection and try again.", 0));
+    xhr.onabort = () => reject(new ApiError("Download cancelled.", 0));
+    xhr.send(JSON.stringify(body));
   });
   return { promise, abort: () => xhr.abort() };
 }
