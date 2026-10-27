@@ -8,7 +8,9 @@
 // circles of the chosen colours, live comments that say something) and lays
 // out the notes as HTML; the export worker (render/export-worker.ts) makes
 // the PDF in a process of its own, as page renders are made. One export runs
-// at a time: a big plan holds a few hundred MB while it's being put together.
+// at a time, and never alongside a page render (render/heavy.ts): a big plan
+// holds a few hundred MB while it's being put together. An export the device
+// gave up on (Cancel, the connection dropped) stops, waiting or running.
 //
 // The server exports what it has: the device saves its pending changes
 // first (DownloadPdfDialog), so the PDF matches what the owner sees.
@@ -23,8 +25,9 @@ import type { CircleColor, CircleRow, CommentRow, PageRow, PlanRow } from "../sh
 import type { ServerConfig } from "./config";
 import type { Db } from "./db";
 import { HttpError, isId, isRecord, MSG } from "./http";
+import { heavyTurn } from "./render/heavy";
 import type { ExportCircle, ExportJob, ExportSheet } from "./render/protocol";
-import { runWorker, WorkerCrashError, WorkerTimeoutError } from "./render/run-worker";
+import { runWorker, WorkerCrashError, WorkerStoppedError, WorkerTimeoutError } from "./render/run-worker";
 import { circlesOfPlan, commentsOfPlan, getSource, pagesOfPlan } from "./repo";
 import { freeBytes, isStorageFull } from "./storage";
 
@@ -49,7 +52,7 @@ export const EXPORT_MSG = {
 
 /** The uploaded originals one PDF may draw on, together (the worker needs a few times this in memory). */
 export const MAX_EXPORT_SOURCE_BYTES = 400 * 1024 * 1024;
-/** Exports waiting for the one being made; more are turned away. */
+/** Exports waiting for their turn; more are turned away. */
 const MAX_WAITING = 3;
 
 /** The request body, checked (400 for anything malformed). */
@@ -76,27 +79,7 @@ function knownTimeZone(v: unknown): string {
   }
 }
 
-// ── one at a time ────────────────────────────────────────────────────────
-
-let queue: Promise<unknown> = Promise.resolve();
 let waiting = 0;
-
-function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
-  if (waiting >= MAX_WAITING) throw new HttpError(429, EXPORT_MSG.busy);
-  waiting++;
-  const run = queue.then(
-    () => {
-      waiting--;
-      return work();
-    },
-    () => {
-      waiting--;
-      return work();
-    },
-  );
-  queue = run.catch(() => {});
-  return run;
-}
 
 // ── what goes in ─────────────────────────────────────────────────────────
 
@@ -127,6 +110,42 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 /** Comments edited more than a minute after they were written say so (as in the app). */
 const wasEdited = (m: CommentRow) => m.updatedAt - m.createdAt > 60_000;
 
+/**
+ * Runs of text mupdf's built-in fonts can't draw, each with the font the
+ * export worker brings for it ("f-…" classes; render/fonts): emoji (with
+ * their modifiers, joiners and flags), symbols (★ ✓ ☐ ■ arrows…), Hebrew,
+ * Arabic, Devanagari and Thai. Anything else is drawn as usual.
+ */
+const RUNS = new RegExp(
+  [
+    // emoji: what Unicode calls emoji, beyond Latin-1 (digits, # and © are "emoji" too, and the usual fonts have them)
+    String.raw`(?<emo>(?![\x00-\xFF])\p{Emoji}(?:\uFE0F|\u20E3|[\u{1F3FB}-\u{1F3FF}]|\p{Regional_Indicator}|\u200D(?![\x00-\xFF])\p{Emoji}\uFE0F?)*)`,
+    String.raw`(?<sym>[\u2190-\u21FF\u2300-\u23FF\u2460-\u27BF\u2900-\u297F\u2B00-\u2BFF]+)`,
+    String.raw`(?<he>\p{Script=Hebrew}(?:[\p{Script=Hebrew} ]*\p{Script=Hebrew})?)`,
+    String.raw`(?<ar>\p{Script=Arabic}(?:[\p{Script=Arabic} ]*\p{Script=Arabic})?)`,
+    String.raw`(?<deva>\p{Script=Devanagari}(?:[\p{Script=Devanagari} ]*\p{Script=Devanagari})?)`,
+    String.raw`(?<thai>\p{Script=Thai}(?:[\p{Script=Thai} ]*\p{Script=Thai})?)`,
+  ].join("|"),
+  "gu",
+);
+
+/** Text the owner typed, as HTML: escaped, with the runs above in their fonts. */
+export function richText(s: string): string {
+  let out = "";
+  let at = 0;
+  for (const m of s.matchAll(RUNS)) {
+    out += esc(s.slice(at, m.index));
+    const kind = Object.entries(m.groups ?? {}).find(([, v]) => v !== undefined)?.[0] ?? "";
+    out += `<span class="f-${kind}">${esc(m[0])}</span>`;
+    at = m.index + m[0].length;
+  }
+  return out + esc(s.slice(at));
+}
+
+/** Shared by the notes and the "couldn't be read" page: the fonts for richText's runs. */
+const FONT_CSS = `.f-emo { font-family: "KWE Emoji"; } .f-sym { font-family: "KWE Symbols"; } .f-he { font-family: "KWE Hebrew"; }
+.f-ar { font-family: "KWE Arabic"; } .f-deva { font-family: "KWE Devanagari"; } .f-thai { font-family: "KWE Thai"; }`;
+
 export interface NotesInput {
   plan: Pick<PlanRow, "name"> & Partial<PlanRow>;
   page: Pick<PageRow, "label">;
@@ -141,25 +160,29 @@ export interface NotesInput {
 /**
  * One page's notes, as HTML for mupdf's layout engine (which knows a subset
  * of CSS: no inline padding, borders on blocks and table cells only, no page
- * break rules — hence a table, one row per circle). The worker draws the
- * Kilowatt Events lockup in the top margin left free here.
+ * break rules). A table: the badge in the left column; one row per comment,
+ * so a long thread breaks between comments instead of jumping whole to the
+ * next page. The worker draws the Kilowatt Events lockup in the top margin
+ * left free here.
  */
 export function notesHtml({ plan, page, position, pageCount, circles, timeZone }: NotesInput): string {
   const when = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   const zone = timeZone === "UTC" ? " UTC" : "";
   const nComments = circles.reduce((k, x) => k + x.comments.length, 0);
+  const comment = (m: CommentRow) =>
+    `<p class="meta">${esc(when.format(m.createdAt))}${zone}${wasEdited(m) ? " · edited" : ""}</p><p class="body">${richText(m.body.trim())}</p>`;
   const rows = circles
     .map(({ circle: c, comments }) => {
       const color = CIRCLE_COLORS[c.color] ? c.color : "gold";
       const meaning = legendOf(plan, color).trim();
-      const head = `<p class="hd"><span style="background-color:${NOTE_SWATCH[color]}">&#160;&#160;&#160;&#160;</span>&#160; <b>${esc(CIRCLE_COLORS[color].label)}</b>${meaning ? ` · ${esc(meaning)}` : ""}</p>`;
-      const title = c.title.trim() ? `<p class="title">${esc(c.title.trim())}</p>` : "";
-      const list = comments.length
-        ? comments
-            .map((m) => `<p class="meta">${esc(when.format(m.createdAt))}${zone}${wasEdited(m) ? " · edited" : ""}</p><p class="body">${esc(m.body.trim())}</p>`)
-            .join("")
-        : `<p class="none">No comments</p>`;
-      return `<tr><td class="n"><span class="badge">&#160;${c.num > 0 ? c.num : "•"}&#160;</span></td><td class="c">${head}${title}${list}</td></tr>`;
+      const head = `<p class="hd"><span style="background-color:${NOTE_SWATCH[color]}">&#160;&#160;&#160;&#160;</span>&#160; <b>${esc(CIRCLE_COLORS[color].label)}</b>${meaning ? ` · ${richText(meaning)}` : ""}</p>`;
+      const title = c.title.trim() ? `<p class="title">${richText(c.title.trim())}</p>` : "";
+      const [first, ...rest] = comments;
+      const badge = `<span class="badge">&#160;${c.num > 0 ? c.num : "•"}&#160;</span>`;
+      return (
+        `<tr><td class="n">${badge}</td><td class="c">${head}${title}${first ? comment(first) : `<p class="none">No comments</p>`}</td></tr>` +
+        rest.map((m) => `<tr><td class="n more"></td><td class="c more">${comment(m)}</td></tr>`).join("")
+      );
     })
     .join("");
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
@@ -170,17 +193,25 @@ h1 { font-size: 15pt; font-weight: bold; margin: 0; }
 .sub { color: #555; margin: 3pt 0 0 0; }
 table { border-collapse: collapse; width: 100%; }
 td { vertical-align: top; border-top: 0.75pt solid #d9d9d9; padding: 7pt 0 7pt 0; }
+td.more { border-top: 0; padding-top: 0; }
 td.n { width: 40pt; }
 .badge { background-color: #000; color: #fee000; font-weight: bold; }
 .hd { margin: 0; }
 .title { font-weight: bold; margin: 3pt 0 0 0; }
 .meta { color: #6b6b6b; font-size: 8.5pt; margin: 5pt 0 0 0; }
+td.more .meta { margin-top: 0; }
 .body { white-space: pre-wrap; margin: 1pt 0 0 0; }
 .none { color: #6b6b6b; font-style: italic; margin: 4pt 0 0 0; }
+${FONT_CSS}
 </style></head><body>
-<div class="top"><h1>${esc(page.label)}</h1><p class="sub">${esc(plan.name)} · Notes for page ${position} of ${pageCount} · ${plural(circles.length, "circle")} · ${plural(nComments, "comment")}</p></div>
+<div class="top"><h1>${richText(page.label)}</h1><p class="sub">${richText(plan.name)} · Notes for page ${position} of ${pageCount} · ${plural(circles.length, "circle")} · ${plural(nComments, "comment")}</p></div>
 <table>${rows}</table>
 </body></html>`;
+}
+
+/** The page that stands in for a sheet whose original can't be read. */
+function placeholderHtml(label: string, withNotes: boolean): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>@page { margin: 64pt 54pt 48pt 54pt; } body { font-family: sans-serif; font-size: 12pt; } ${FONT_CSS}</style></head><body><p>“${richText(label)}” couldn't be read from the file it was uploaded in, so it isn't in this PDF.${withNotes ? " Its circles are listed on the next page." : ""}</p></body></html>`;
 }
 
 // ── the export ───────────────────────────────────────────────────────────
@@ -199,10 +230,30 @@ export interface ExportDeps {
   config: Pick<ServerConfig, "dataDir" | "clientDir" | "minFreeBytes" | "exportTimeoutMs">;
 }
 
-export function exportPlanPdf(deps: ExportDeps, plan: PlanRow, opts: ExportOptions): Promise<ExportResult> {
-  // checked before waiting in line: a mistake is reported at once
+/** The device went away (Cancel, a dropped connection) before the PDF was made: nothing to send. */
+export class ExportCancelled extends Error {}
+
+/**
+ * Makes the PDF. `signal` is the request's: once it aborts, an export still
+ * waiting for its turn gives its place up, and one being made is stopped.
+ */
+export async function exportPlanPdf(deps: ExportDeps, plan: PlanRow, opts: ExportOptions, signal?: AbortSignal): Promise<ExportResult> {
+  // checked before waiting: a mistake is reported at once
   const job = buildJob(deps, plan, opts);
-  return oneAtATime(() => run(deps, job.job, job.fileName));
+  if (waiting >= MAX_WAITING) throw new HttpError(429, EXPORT_MSG.busy);
+  waiting++;
+  let done: () => void;
+  try {
+    done = await heavyTurn();
+  } finally {
+    waiting--;
+  }
+  try {
+    if (signal?.aborted) throw new ExportCancelled();
+    return await run(deps, job.job, job.fileName, signal);
+  } finally {
+    done();
+  }
 }
 
 function buildJob({ db, config }: ExportDeps, plan: PlanRow, opts: ExportOptions): { job: ExportJob; fileName: string } {
@@ -270,7 +321,7 @@ function buildJob({ db, config }: ExportDeps, plan: PlanRow, opts: ExportOptions
             timeZone: opts.timeZone,
           })
         : null,
-      missingText: `“${p.label}” couldn't be read from the file it was uploaded in, so it isn't in this PDF.${withNotes ? " Its circles are listed on the next page." : ""}`,
+      placeholderHtml: placeholderHtml(p.label, withNotes),
     };
   });
   const logo = path.join(config.clientDir, "brand", "lockup-black.png");
@@ -280,7 +331,7 @@ function buildJob({ db, config }: ExportDeps, plan: PlanRow, opts: ExportOptions
   };
 }
 
-async function run({ config }: ExportDeps, job: ExportJob, fileName: string): Promise<ExportResult> {
+async function run({ config }: ExportDeps, job: ExportJob, fileName: string, signal?: AbortSignal): Promise<ExportResult> {
   const tmp = path.join(config.dataDir, "tmp");
   const id = randomUUID();
   const jobFile = path.join(tmp, `export-${id}.json`);
@@ -293,20 +344,26 @@ async function run({ config }: ExportDeps, job: ExportJob, fileName: string): Pr
     if (isStorageFull(e)) throw new HttpError(507, EXPORT_MSG.storageFull);
     throw e;
   }
+  const worker = runWorker({ task: "export", jobFile, outFile }, { timeoutMs: config.exportTimeoutMs });
+  const stop = () => void worker.terminate();
+  signal?.addEventListener("abort", stop, { once: true });
   try {
-    const m = await runWorker({ task: "export", jobFile, outFile }, { timeoutMs: config.exportTimeoutMs }).promise;
+    const m = await worker.promise;
+    if (signal?.aborted) throw new ExportCancelled();
     if (m.type === "exported") return { file: outFile, bytes: m.bytes, pages: m.pages, fileName };
     fs.rmSync(outFile, { force: true });
     if (m.type === "error" && m.code === "nospace") throw new HttpError(507, EXPORT_MSG.storageFull);
     throw new ExportFailed(m.type === "error" ? m.message : `unexpected answer: ${m.type}`);
   } catch (e) {
     fs.rmSync(outFile, { force: true });
-    if (e instanceof HttpError || e instanceof ExportFailed) throw e;
+    if (e instanceof HttpError || e instanceof ExportFailed || e instanceof ExportCancelled) throw e;
+    if (e instanceof WorkerStoppedError) throw new ExportCancelled();
     if (e instanceof WorkerTimeoutError) throw new HttpError(500, EXPORT_MSG.timeout);
     // killed: almost always out of memory — too much at once
     if (e instanceof WorkerCrashError) throw new HttpError(500, EXPORT_MSG.tooBig);
     throw e;
   } finally {
+    signal?.removeEventListener("abort", stop);
     fs.rmSync(jobFile, { force: true });
   }
 }

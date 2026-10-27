@@ -55,8 +55,8 @@ export interface ExportSheet {
   circles: ExportCircle[];
   /** The notes pages that follow this sheet (an HTML document laid out by mupdf); null: none. */
   notesHtml: string | null;
-  /** Shown on a placeholder page if the original can't be read. */
-  missingText: string;
+  /** The page (HTML) that stands in for this one if the original can't be read. */
+  placeholderHtml: string;
 }
 
 /** A circle as the app stores it (fractions of the page as shown), with its colour resolved. */

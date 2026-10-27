@@ -1,6 +1,7 @@
 // Bundles the Node server and its two workers (page renders, "Download PDF") into dist/server.
 // npm packages stay external (node_modules ships in the image): mupdf loads
 // its WebAssembly from its own folder and sharp has native binaries.
+import fs from "node:fs";
 import { build } from "esbuild";
 
 await build({
@@ -14,3 +15,6 @@ await build({
   sourcemap: true,
   logLevel: "info",
 });
+
+// the notes pages' fallback fonts (export-worker.ts finds them next to it)
+fs.cpSync("src/server/render/fonts", "dist/server/fonts", { recursive: true });

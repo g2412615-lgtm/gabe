@@ -792,6 +792,8 @@ test.describe("the editor", () => {
     expect(notes).toContain(name);
     expect(notes).toContain("Red");
     expect(notes).toContain("Two scanners at doors open.");
+    // a computer has the file already, so Done is the button to press; on a touch screen it's Save PDF (Done is the quiet one)
+    await expect(dialog.getByRole("button", { name: isTouch(info) ? "Save PDF" : "Done" })).toHaveClass(/\bprimary\b/);
     await press(dialog.getByRole("button", { name: "Done" }), info);
     await expect(dialog).toBeHidden();
 
@@ -805,7 +807,29 @@ test.describe("the editor", () => {
     const one = await fetchPdf(pdfFileName(name, "P-1"));
     expect(one.countPages()).toBe(1);
     expect(one.loadPage(0).getLabel()).toBe("P-1");
-    expect(liveCircles(await getPlan(page, planId))).toHaveLength(1); // nothing in the plan changed
+    await press(dialog.getByRole("button", { name: "Done" }), info);
+
+    // ── closed while it's still saving the latest change: no PDF is made ──
+    let exports = 0;
+    page.on("request", (r) => {
+      if (r.url().endsWith("/export")) exports++;
+    });
+    await addCircleAt(page, info, planId, await sheetPoint(page, 0.6, 0.6));
+    // the next change takes a while to save (venue Wi-Fi)
+    await page.route("**/api/plans/*/sync", async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+    await press(ed.panel.getByRole("button", { name: /^Blue/ }), info);
+    await press(ed.sidebar.getByRole("button", { name: /Download PDF/ }), info);
+    await press(dialog.getByRole("button", { name: "Download PDF" }), info);
+    await press(dialog.getByRole("button", { name: "Cancel" }), info);
+    await expect(dialog).toBeHidden();
+    await page.unroute("**/api/plans/*/sync");
+    await expectSaved(page);
+    await page.waitForTimeout(500);
+    expect(exports).toBe(0);
+    expect(liveCircles(await getPlan(page, planId)).map((c) => c.color).sort()).toEqual(["blue", "red"]); // the change was saved all the same
   });
 
   test("add pages from a second PDF, delete one page; home shows the counts", async ({ page }, info) => {

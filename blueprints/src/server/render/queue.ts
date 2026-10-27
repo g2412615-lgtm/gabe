@@ -1,7 +1,7 @@
 // The render queue lives in the database: every page with status 'queued' is
 // waiting. One page renders at a time (a 1-CPU host has nothing to gain from
 // more, and each render holds a few hundred MB), each in a fresh worker
-// process. Status moves queued → rendering → preview (viewable) → ready, or
+// process, and never while a "Download PDF" is being made (heavy.ts). Status moves queued → rendering → preview (viewable) → ready, or
 // → failed with a plain-language error and a Retry button in the editor.
 //
 // A page whose renderer keeps dying (out of memory — or the whole server
@@ -16,6 +16,7 @@ import path from "node:path";
 import { tx, type Db } from "../db";
 import type { Logger } from "../log";
 import { freeBytes, STORAGE_FULL } from "../storage";
+import { heavyTurn } from "./heavy";
 import type { FinalMessage } from "./protocol";
 import { runWorker, WorkerCrashError, WorkerTimeoutError, type WorkerRun } from "./run-worker";
 
@@ -143,9 +144,16 @@ export class RenderQueue {
   private async loop() {
     try {
       while (!this.stopping) {
-        const job = this.claimNext();
-        if (!job) break;
-        await this.render(job);
+        // a "Download PDF" being made goes first (heavy.ts): claimed only once it's this page's turn
+        const done = await heavyTurn();
+        try {
+          if (this.stopping) break;
+          const job = this.claimNext();
+          if (!job) break;
+          await this.render(job);
+        } finally {
+          done();
+        }
       }
     } catch (e) {
       this.opts.log.error("[render] queue loop stopped", e);

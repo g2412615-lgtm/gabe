@@ -10,8 +10,10 @@
 //  - the circles drawn on top of it as plain PDF drawing — the same colours,
 //    and the number badges the map shows — so they print and look the same
 //    in every PDF viewer;
-//  - after each page, its notes pages (laid out from HTML by mupdf);
-//  - a bookmark and a page label per page.
+//  - after each page, its notes pages (laid out from HTML by mupdf, with
+//    fonts of our own for what its built-in ones lack: ./fonts);
+//  - a bookmark and a page label per page; layers the original hides stay
+//    hidden.
 //
 // The task arrives as JSON in argv[2], the job itself in a file (it can be
 // bigger than a command line may be); the answer goes back over the IPC
@@ -44,8 +46,10 @@ const KW_GOLD: Rgb = [254 / 255, 224 / 255, 0];
 
 /** An uploaded PNG/JPG becomes a page at this resolution… */
 const IMAGE_DPI = 150;
-/** …but never bigger than an ARCH D sheet (36 × 24 in). */
+/** …but never bigger than an ARCH D sheet (36 × 24 in)… */
 const IMAGE_MAX_SIDE = 36 * 72;
+/** …so it never needs more pixels than this on its long side (a bigger upload is scaled down first: mupdf would hold all of it). */
+const IMAGE_MAX_PX = Math.round((IMAGE_MAX_SIDE * IMAGE_DPI) / 72);
 
 /** Notes pages: US letter. The HTML (export.ts) leaves the top 64 pt for the logo. */
 const NOTES_W = 612;
@@ -57,6 +61,37 @@ const LOGO = { h: 18, left: 54, top: 28 };
 // mupdf prints "repairing PDF" chatter for slightly broken files; real
 // failures surface as exceptions.
 mupdf.setLog({ error: () => {}, warning: () => {} });
+
+// The notes' HTML asks for these by name (export.ts richText) where mupdf's
+// built-in fonts have nothing: emoji, symbols and some alphabets.
+const FONT_DIR = new URL("./fonts/", import.meta.url);
+const FONT_FILES: Record<string, string> = {
+  "KWE Emoji": "NotoEmoji.ttf",
+  "KWE Symbols": "NotoSansSymbols2-Regular.ttf",
+  "KWE Hebrew": "NotoSansHebrew-Regular.ttf",
+  "KWE Arabic": "NotoSansArabic-Regular.ttf",
+  "KWE Devanagari": "NotoSansDevanagari-Regular.ttf",
+  "KWE Thai": "NotoSansThai-Regular.ttf",
+};
+const fonts = new Map<string, mupdf.Font | null>();
+/** Kept for good: mupdf takes over (and later drops) the reference it's handed, so each hand-over is a reference of its own. */
+const handedOver: mupdf.Font[] = [];
+mupdf.installLoadFontFunction((name: string) => {
+  const file = FONT_FILES[name];
+  if (!file) return null;
+  if (!fonts.has(name)) {
+    try {
+      fonts.set(name, new mupdf.Font(name, fs.readFileSync(new URL(file, FONT_DIR))));
+    } catch {
+      fonts.set(name, null); // missing: those characters go undrawn, as before
+    }
+  }
+  const font = fonts.get(name);
+  if (!font) return null;
+  const ref = new mupdf.Font(font.pointer);
+  handedOver.push(ref);
+  return ref;
+});
 
 // Out of memory: the kernel should kill this process, not the server (the
 // server sets this as it starts the worker; this is the fallback).
@@ -109,6 +144,8 @@ const asciiHex = (s: string) => `<${[...s].map((ch) => (ch.charCodeAt(0) & 0x7f)
 interface Shared {
   /** Helvetica-Bold, not embedded: every PDF viewer has it. */
   font: mupdf.PDFObject;
+  /** Forms made by joining a page's content streams, so the same sheet twice shares one. */
+  joined: Map<string, mupdf.PDFObject>;
   /** Its metrics (mupdf's built-in Nimbus Sans Bold has the same widths), to centre the figures. */
   metrics: mupdf.Font;
   /** One ExtGState per fill opacity, by name. */
@@ -127,6 +164,7 @@ function makeShared(out: mupdf.PDFDocument, sheets: ExportSheet[]): Shared {
     }
   return {
     font: out.addObject({ Type: "Font", Subtype: "Type1", BaseFont: "Helvetica-Bold", Encoding: "WinAnsiEncoding" }),
+    joined: new Map(),
     metrics: new mupdf.Font("Helvetica-Bold"),
     states,
     q: out.addStream("q\n", {}),
@@ -238,14 +276,23 @@ function drawCircles(out: mupdf.PDFDocument, index: number, circles: ExportCircl
     if (!parms.isNull()) dict.DecodeParms = parms;
     form = out.addRawStream(single.readRawStream(), dict);
   } else {
-    // several streams: joined (one may end mid-token, hence the line breaks)
-    const buf = new mupdf.Buffer();
-    for (const p of parts)
-      if (p.isStream()) {
-        buf.writeBuffer(p.readStream());
-        buf.write("\n");
-      }
-    form = out.addStream(buf, formDict);
+    // several streams (always so once a page's markups are merged in): joined
+    // — one may end mid-token, hence the line breaks — once per sheet
+    const key = parts.every((p) => p.isIndirect())
+      ? `${parts.map((p) => p.asIndirect()).join(",")}|${formDict.Resources.isIndirect() ? formDict.Resources.asIndirect() : formDict.Resources.toString()}|${bbox.toString()}`
+      : null;
+    const known = key === null ? undefined : shared.joined.get(key);
+    if (known) form = known;
+    else {
+      const buf = new mupdf.Buffer();
+      for (const p of parts)
+        if (p.isStream()) {
+          buf.writeBuffer(p.readStream());
+          buf.write("\n");
+        }
+      form = out.addStream(buf, formDict);
+      if (key !== null) shared.joined.set(key, form);
+    }
   }
   const xobjects = copyDict(out, res.get("XObject"));
   xobjects.put("KWEPage", form);
@@ -303,11 +350,21 @@ function openPdfFile(file: string): { doc: mupdf.PDFDocument; close(): void } {
   }
 }
 
-/** A PNG/JPG upload as a page, upright as the app shows it (EXIF rotation applied, as the renderer does). */
+/**
+ * A PNG/JPG upload as a page, upright as the app shows it (EXIF rotation
+ * applied, as the renderer does), and no bigger than the page needs: an
+ * image that's already both goes in as it is.
+ */
 async function addImagePage(out: mupdf.PDFDocument, file: string) {
   const meta = await sharp(file).metadata();
   let bytes: Buffer = fs.readFileSync(file);
-  if ((meta.orientation ?? 1) > 1) bytes = await sharp(bytes).rotate().toFormat(meta.format === "png" ? "png" : "jpeg", { quality: 92 }).toBuffer();
+  const turned = (meta.orientation ?? 1) > 1;
+  if (turned || Math.max(meta.width ?? 0, meta.height ?? 0) > IMAGE_MAX_PX)
+    bytes = await sharp(file)
+      .rotate()
+      .resize({ width: IMAGE_MAX_PX, height: IMAGE_MAX_PX, fit: "inside", withoutEnlargement: true })
+      .toFormat(meta.format === "png" ? "png" : "jpeg", { quality: 92 })
+      .toBuffer();
   const img = new mupdf.Image(bytes);
   let w = (img.getWidth() * 72) / IMAGE_DPI;
   let h = (img.getHeight() * 72) / IMAGE_DPI;
@@ -355,10 +412,46 @@ function appendAll(out: mupdf.PDFDocument, doc: mupdf.PDFDocument): number[] {
   return at;
 }
 
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c);
+/**
+ * Layers (optional content) the source hides stay hidden: a copied page keeps
+ * its marks but not the file's list of layers, and without that list every
+ * viewer shows every layer. Its layers join the export's list, those that
+ * are off by default still off.
+ */
+function keepLayers(out: mupdf.PDFDocument, src: mupdf.PDFDocument, map: mupdf.PDFGraftMap) {
+  // (get() on a missing entry's null object throws: everything is checked first)
+  const props = src.getTrailer().get("Root").get("OCProperties");
+  if (!props.isDictionary()) return;
+  const groups = props.get("OCGs");
+  if (!groups.isArray()) return;
+  const config = props.get("D");
+  const refs = (key: string) => {
+    const set = new Set<number>();
+    const list = config.isDictionary() ? config.get(key) : null;
+    if (list?.isArray()) for (let i = 0; i < list.length; i++) if (list.get(i).isIndirect()) set.add(list.get(i).asIndirect());
+    return set;
+  };
+  const on = refs("ON");
+  const off = refs("OFF");
+  const allOff = config.isDictionary() && config.get("BaseState").toString() === "/OFF";
 
-function placeholderHtml(text: string): string {
-  return `<!DOCTYPE html><html><head><style>@page { margin: 64pt 54pt 48pt 54pt; } body { font-family: sans-serif; font-size: 12pt; }</style></head><body><p>${esc(text)}</p></body></html>`;
+  const root = out.getTrailer().get("Root");
+  let mine = root.get("OCProperties");
+  if (!mine.isDictionary()) {
+    mine = out.newDictionary();
+    mine.put("OCGs", out.newArray());
+    const d = out.newDictionary();
+    d.put("OFF", out.newArray());
+    mine.put("D", d);
+    root.put("OCProperties", mine);
+  }
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups.get(i);
+    if (!g.isIndirect()) continue;
+    const copy = map.graftObject(g);
+    mine.get("OCGs").push(copy);
+    if (allOff ? !on.has(g.asIndirect()) : off.has(g.asIndirect())) mine.get("D").get("OFF").push(copy);
+  }
 }
 
 // ── the export ───────────────────────────────────────────────────────────
@@ -394,22 +487,43 @@ async function exportPdf(task: Extract<WorkerTask, { task: "export" }>): Promise
         src?.close();
         continue; // unreadable: those pages get a placeholder
       }
+      // Some files point at objects they don't have (a quirk of some
+      // producers; viewers shrug it off, copying a page can't): those pages
+      // are copied from a tidied copy of the file instead.
+      let tidied: mupdf.PDFDocument | null = null;
+      let tidiedMap: mupdf.PDFGraftMap | null = null;
       try {
         const map = out.newGraftMap();
+        const copyPage = (doc: mupdf.PDFDocument, m: mupdf.PDFGraftMap, i: number) => {
+          // one copy per wanted page, so the same sheet wanted twice gets two pages (sharing their contents)
+          m.graftPage(-1, doc, sheets[i].index);
+          const at = out.countPages() - 1;
+          // a page's transparency group doesn't come with a copied page either
+          const group = doc.findPage(sheets[i].index).get("Group");
+          if (!group.isNull()) out.findPage(at).put("Group", m.graftObject(group));
+          sheetAt[i] = at;
+        };
         for (const i of list) {
           try {
-            // one copy per wanted page, so the same sheet wanted twice gets two pages (sharing their contents)
-            map.graftPage(-1, src.doc, sheets[i].index);
-            sheetAt[i] = out.countPages() - 1;
-            // a page's transparency group doesn't come with a copied page either
-            const group = src.doc.findPage(sheets[i].index).get("Group");
-            if (!group.isNull()) out.findPage(sheetAt[i]).put("Group", map.graftObject(group));
+            copyPage(src.doc, map, i);
           } catch {
-            /* a broken page: a placeholder */
+            try {
+              tidied ??= new mupdf.PDFDocument(src.doc.saveToBuffer("garbage"));
+              tidiedMap ??= out.newGraftMap();
+              copyPage(tidied, tidiedMap, i);
+            } catch {
+              /* a broken page: a placeholder */
+            }
           }
         }
+        keepLayers(out, src.doc, map);
         map.destroy();
+        if (tidied && tidiedMap) {
+          keepLayers(out, tidied, tidiedMap);
+          tidiedMap.destroy();
+        }
       } finally {
+        tidied?.destroy();
         src.close();
       }
     }
@@ -424,7 +538,7 @@ async function exportPdf(task: Extract<WorkerTask, { task: "export" }>): Promise
     }
     for (let i = 0; i < sheets.length; i++) {
       if (sheetAt[i] >= 0) continue;
-      const doc = htmlToPdf(placeholderHtml(sheets[i].missingText));
+      const doc = htmlToPdf(sheets[i].placeholderHtml);
       sheetAt[i] = appendAll(out, doc)[0];
       doc.destroy();
       placeholder[i] = true;
@@ -472,7 +586,8 @@ async function exportPdf(task: Extract<WorkerTask, { task: "export" }>): Promise
     out.setMetaData("info:Creator", "KWE Blueprints");
 
     const pages = out.countPages();
-    const buf = out.saveToBuffer("compress");
+    // "garbage": leaves out what the export no longer uses (a page's content streams once joined into one form)
+    const buf = out.saveToBuffer("garbage,compress");
     try {
       const data = buf.asUint8Array(); // a view of mupdf's memory: written without a copy
       const fd = fs.openSync(task.outFile, "w");

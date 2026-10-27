@@ -53,11 +53,22 @@ export default function DownloadPdfDialog({ store, pageIds, hiddenColors, onClos
   const [phase, setPhase] = useState<Phase>({ step: "choose" });
   const [error, setError] = useState<string | null>(null);
   const request = useRef<PdfDownload | null>(null);
+  /** False once the dialog has closed: whatever was under way stops there. */
+  const open = useRef(true);
   const pagesId = useId();
   const bodyRef = useRef<HTMLDivElement>(null);
+  const submitRef = useRef<HTMLButtonElement>(null);
+  const saveRef = useRef<HTMLButtonElement>(null);
 
-  // closing the dialog stops a download on its way
-  useEffect(() => () => request.current?.abort(), []);
+  // closing the dialog stops a download on its way (or one about to start once the save is done)
+  useEffect(
+    () => () => {
+      open.current = false;
+      request.current?.abort();
+    },
+    [],
+  );
+  const alive = () => open.current && editorAlive();
 
   const chosen = pages.filter((p) => picked.has(p.id));
   const colors = onlyShown ? CIRCLE_COLOR_ORDER.filter((c) => !hiddenColors.has(c)) : CIRCLE_COLOR_ORDER;
@@ -80,9 +91,10 @@ export default function DownloadPdfDialog({ store, pageIds, hiddenColors, onClos
     setPhase({ step: "saving" });
     // the server makes the PDF from what it has: this device's changes go first
     await store.flushNow();
-    if (!editorAlive()) return;
+    if (!alive()) return;
     if (store.hasUnsaved()) {
       setPhase({ step: "choose" });
+      refocus();
       const st = store.getState().save.state;
       setError(
         st === "signedOut"
@@ -108,34 +120,48 @@ export default function DownloadPdfDialog({ store, pageIds, hiddenColors, onClos
     request.current = req;
     try {
       const blob = await req.promise;
-      if (!editorAlive() || request.current !== req) return;
+      if (!alive() || request.current !== req) return;
       request.current = null;
       setPhase({ step: "ready", blob, name });
       // a computer takes the download now; a touch device waits for a tap (see Save PDF)
       if (!coarse) saveFile(blob, name);
+      // the button that was pressed is gone: the one to press next takes focus (Enter, a screen reader)
+      requestAnimationFrame(() => saveRef.current?.focus());
     } catch (err) {
-      if (!editorAlive() || request.current !== req) return;
+      if (!alive() || request.current !== req) return;
       request.current = null;
       setPhase({ step: "choose" });
       const why = err instanceof ApiError && err.message ? err.message : "Check the connection and try again.";
       setError(`The PDF wasn't made. ${why}`);
+      refocus();
     }
+  };
+
+  /** Focus went to the page while Download was disabled: back to it, so Enter tries again (with a keyboard). */
+  const refocus = () => {
+    if (!coarse) requestAnimationFrame(() => submitRef.current?.focus());
   };
 
   const share = phase.step === "ready" ? shareableFile(phase.blob, phase.name) : null;
 
+  // On a touch screen nothing is saved until Share… or Save PDF is tapped: that's the button to press (Done would lose it).
   const footer =
     phase.step === "ready" ? (
       <>
         {share && (
-          <button type="button" onClick={() => void shareFile(share)}>
+          <button type="button" className={coarse ? "primary" : undefined} ref={coarse ? saveRef : undefined} onClick={() => void shareFile(share)}>
             Share…
           </button>
         )}
-        <button type="button" onClick={() => saveFile(phase.blob, phase.name)}>
+        <button
+          type="button"
+          className={coarse && !share ? "primary" : undefined}
+          ref={coarse && !share ? saveRef : undefined}
+          onClick={() => saveFile(phase.blob, phase.name)}
+        >
           <IconDownload size={14} /> {coarse ? "Save PDF" : "Download again"}
         </button>
-        <button type="button" className="primary" onClick={onClose}>
+        <button type="button" className={coarse ? undefined : "primary"} ref={coarse ? undefined : saveRef} onClick={onClose}>
           Done
         </button>
       </>
@@ -144,7 +170,7 @@ export default function DownloadPdfDialog({ store, pageIds, hiddenColors, onClos
         <button type="button" onClick={onClose}>
           Cancel
         </button>
-        <button type="submit" className="primary" disabled={busy || chosen.length === 0}>
+        <button type="submit" className="primary" ref={submitRef} disabled={busy || chosen.length === 0}>
           {busy ? <Spinner size={12} /> : <IconDownload size={14} />} {busy ? "Making the PDF…" : "Download PDF"}
         </button>
       </>

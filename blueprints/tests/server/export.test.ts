@@ -7,7 +7,8 @@ import fs from "node:fs";
 import path from "node:path";
 import * as mupdf from "mupdf";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { notesHtml } from "../../src/server/export";
+import sharp from "sharp";
+import { notesHtml, richText } from "../../src/server/export";
 import { pdfFileName } from "../../src/shared/labels";
 import { comparePages } from "../../src/shared/order";
 import type { CircleRow, PageRow, PlanDoc, SyncOp, SyncResponse } from "../../src/shared/types";
@@ -41,8 +42,8 @@ function comment(circleKey: string, body: string, over: { key?: string; createdA
   if (over.key) ids[over.key] = id;
   return { kind: "comment", id, base: null, data: { circleId: ids[circleKey], body, createdAt: over.createdAt ?? Date.now(), deletedAt: null } };
 }
-const sync = async (ops: SyncOp[]) => {
-  const r = await c.post<SyncResponse>(`/api/plans/${planId}/sync`, { ops });
+const sync = async (ops: SyncOp[], plan = planId) => {
+  const r = await c.post<SyncResponse>(`/api/plans/${plan}/sync`, { ops });
   expect(r.status).toBe(200);
   expect(r.json.rejected).toEqual([]);
   return r.json;
@@ -93,8 +94,8 @@ afterAll(async () => {
   await server?.stop();
 });
 
-async function exportPdf(body: unknown, headers: Record<string, string> = {}) {
-  const res = await fetch(`${server.url}/api/plans/${planId}/export`, {
+async function exportPdf(body: unknown, headers: Record<string, string> = {}, plan = planId) {
+  const res = await fetch(`${server.url}/api/plans/${plan}/export`, {
     method: "POST",
     headers: { cookie: c.cookie, "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
@@ -278,6 +279,140 @@ describe("options", () => {
     const { bytes } = await exportPdf({ pageIds: [pages[3].id, pages[1].id], notes: false });
     const doc = open(bytes);
     expect((doc.loadOutline() ?? []).map((o) => o.title)).toEqual(["P-1", "R-1"]);
+  });
+});
+
+/** A plan of its own from `bytes`; its pages once they're listed. */
+async function planFrom(bytes: Uint8Array, filename: string, type = "application/pdf") {
+  const up = await c.upload(bytes, { filename, type });
+  expect(up.status, up.json?.error).toBe(201);
+  return { id: up.json.plan.id as string, pages: up.json.pages as PageRow[] };
+}
+const tmpExports = () => fs.readdirSync(path.join(server.dataDir, "tmp")).filter((f) => f.startsWith("export-"));
+
+describe("awkward files", () => {
+  it("layers the original hides stay hidden", async () => {
+    const src = new mupdf.PDFDocument();
+    const hidden = src.addObject({ Type: "OCG", Name: "Hidden layer" });
+    const shown = src.addObject({ Type: "OCG", Name: "Shown layer" });
+    const content = "/OC /H BDC 0.76 0.12 0.12 rg 100 400 150 150 re f EMC\n/OC /S BDC 0.12 0.48 0.23 rg 350 400 150 150 re f EMC\n";
+    src.insertPage(-1, src.addPage([0, 0, 612, 792], 0, { Properties: { H: hidden, S: shown } }, content));
+    const props = src.newDictionary();
+    const groups = src.newArray();
+    groups.push(hidden);
+    groups.push(shown);
+    props.put("OCGs", groups);
+    const d = src.newDictionary();
+    const off = src.newArray();
+    off.push(hidden);
+    d.put("OFF", off);
+    props.put("D", d);
+    src.getTrailer().get("Root").put("OCProperties", props);
+    const plan = await planFrom(src.saveToBuffer("").asUint8Array().slice(), "layers.pdf");
+    const { res, bytes } = await exportPdf({ pageIds: [plan.pages[0].id], notes: false }, {}, plan.id);
+    expect(res.status).toBe(200);
+    const doc = open(bytes);
+    expect(findColour(doc, 0, RED, 20)).toBeNull();
+    expect(findColour(doc, 0, GREEN, 20)).not.toBeNull();
+  });
+
+  it("a file that points at objects it doesn't have still comes out as its page, circles on", async () => {
+    // a font whose descriptor is missing (object 99 of a 6-object file): viewers shrug, copying a page can't
+    const objs = [
+      "<< /Type /Catalog /Pages 2 0 R >>",
+      "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+      "",
+      "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FontDescriptor 99 0 R >>",
+    ];
+    const text = "BT /F1 36 Tf 72 600 Td (Dangling sheet) Tj ET";
+    objs[3] = `<< /Length ${text.length} >>\nstream\n${text}\nendstream`;
+    let pdf = "%PDF-1.7\n";
+    const at: number[] = [];
+    objs.forEach((o, i) => {
+      at.push(pdf.length);
+      pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
+    });
+    const xref = pdf.length;
+    pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${at.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
+    pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    const plan = await planFrom(new TextEncoder().encode(pdf), "dangling.pdf");
+    await sync([circle(plan.pages[0].id, { key: "dangling", x: 0.5, y: 0.3, r: 0.05, color: "red" })], plan.id);
+    const { res, bytes } = await exportPdf({ pageIds: [plan.pages[0].id], notes: false }, {}, plan.id);
+    expect(res.status).toBe(200);
+    const doc = open(bytes);
+    expect(textOf(doc, 0)).toContain("Dangling sheet");
+    expect(findColour(doc, 0, RED)).not.toBeNull();
+  });
+
+  it("a huge photo is scaled to the page's needs (36 in at 150 dpi) instead of held whole", async () => {
+    const png = await sharp({ create: { width: 7000, height: 3500, channels: 3, background: "#ffffff" } }).png().toBuffer();
+    const plan = await planFrom(png, "huge.png", "image/png");
+    const { res, bytes } = await exportPdf({ pageIds: [plan.pages[0].id], notes: false }, {}, plan.id);
+    expect(res.status).toBe(200);
+    const doc = open(bytes);
+    const page = doc.loadPage(0);
+    expect(page.getBounds()).toEqual([0, 0, 2592, 1296]);
+    page.destroy();
+    const img = doc.findPage(0).get("Resources").get("XObject").get("KWEPage").get("Resources").get("XObject").get("KWEImg");
+    expect(img.get("Width").asNumber()).toBe(5400);
+  });
+
+  it("emoji, symbols and other alphabets in the notes get fonts that can draw them", async () => {
+    await sync([comment("red", "👍 ✅ done ★ → עברית العربية हिन्दी ไทย", { createdAt: Date.UTC(2026, 9, 14) })]);
+    try {
+      const { bytes } = await exportPdf({ pageIds: [pages[0].id], notes: true });
+      const doc = open(bytes);
+      const fonts: string[] = [];
+      const res = doc.findPage(1).get("Resources").get("Font");
+      res.forEach((f) => fonts.push(f.get("BaseFont").toString()));
+      // embedded under the names the notes ask for (subset: "/ABCDEF+KWE#20Emoji")
+      for (const name of ["Emoji", "Symbols", "Hebrew", "Arabic", "Devanagari", "Thai"]) expect(fonts.join(" ")).toContain(`KWE#20${name}`);
+      if (process.env.EXPORT_DUMP) fs.writeFileSync(process.env.EXPORT_DUMP, bytes);
+    } finally {
+      const doc = (await c.get<PlanDoc>(`/api/plans/${planId}`)).json;
+      const m = doc.comments.find((x) => x.body.startsWith("👍"))!;
+      await sync([{ kind: "comment", id: m.id, base: { body: m.body, deletedAt: null }, data: { body: m.body, deletedAt: 1 } }]);
+    }
+  });
+
+  it("a long comment thread starts on the first notes page (one row per comment)", async () => {
+    const lines = Array.from({ length: 6 }, (_, i) => `Line ${i + 1} of a long note about the loading dock and the stage door.`).join("\n");
+    const plan = await planFrom(await sharp({ create: { width: 800, height: 600, channels: 3, background: "#ffffff" } }).png().toBuffer(), "thread.png", "image/png");
+    await sync([circle(plan.pages[0].id, { key: "thread", color: "blue" })], plan.id);
+    await sync(Array.from({ length: 15 }, (_, i) => comment("thread", `Comment ${i + 1}\n${lines}`, { createdAt: Date.UTC(2026, 9, 1, 12, i) })), plan.id);
+    const { bytes } = await exportPdf({ pageIds: [plan.pages[0].id], notes: true }, {}, plan.id);
+    const doc = open(bytes);
+    expect(doc.countPages()).toBeGreaterThan(2);
+    expect(textOf(doc, 1)).toContain("Comment 1\n");
+  });
+
+  it("an export the device gives up on stops, and leaves nothing behind", async () => {
+    const ctrl = new AbortController();
+    const going = fetch(`${server.url}/api/plans/${planId}/export`, {
+      method: "POST",
+      headers: { cookie: c.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ pageIds: allPages(), notes: true }),
+      signal: ctrl.signal,
+    }).catch(() => null);
+    await new Promise((r) => setTimeout(r, 150));
+    ctrl.abort();
+    await going;
+    await waitFor(async () => (tmpExports().length === 0 ? true : null), 10_000);
+    const started = Date.now();
+    const { res } = await exportPdf({ pageIds: [pages[1].id], notes: false });
+    expect(res.status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    await waitFor(async () => (tmpExports().length === 0 ? true : null), 5_000);
+  });
+});
+
+describe("richText", () => {
+  it("puts emoji, symbols and other alphabets in their fonts, and escapes the rest", () => {
+    expect(richText("Gate <A> 👍🏽 ok")).toBe('Gate &lt;A&gt; <span class="f-emo">👍🏽</span> ok');
+    expect(richText("★ → x")).toBe('<span class="f-sym">★</span> <span class="f-sym">→</span> x');
+    expect(richText("כניסה ראשית: A")).toBe('<span class="f-he">כניסה ראשית</span>: A');
+    expect(richText("👨‍👩‍👧 🇺🇸")).toBe('<span class="f-emo">👨‍👩‍👧</span> <span class="f-emo">🇺🇸</span>');
   });
 });
 
