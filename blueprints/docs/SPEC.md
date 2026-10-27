@@ -122,6 +122,7 @@ from `/api/*` (except assets) send `Cache-Control: no-store`.
 | `GET /api/pages/:id/:assetKey/thumb.webp` | | thumbnail (long side ≤ 480) |
 | `GET /api/pages/:id/:assetKey/tiles/:level/:col_:row.(png|jpeg)` | | one deep-zoom tile |
 | `GET /api/sources/:id/original` | | the uploaded file as-is (`Content-Disposition: attachment`) |
+| `POST /api/plans/:id/export` | `ExportPdfRequest` `{ pageIds, colors?, notes, timeZone? }` | the PDF itself (`application/pdf`, `Content-Disposition: attachment`, "Plan name.pdf" or "Plan name - A-101.pdf" for one page, `pdfFileName`) — see §5.1. 400 malformed / no pages; 409 "Those pages were deleted…" when none of `pageIds` is a live page of the plan; 413 when the originals it draws on pass 400 MB together; 429 when three exports are already waiting; 500 failed / took too long (10 min); 507 storage full; 404 missing/deleted plan |
 
 Assets: `Cache-Control: private, max-age=31536000, immutable` (the assetKey in
 the path changes on every re-render), `X-Content-Type-Options: nosniff`,
@@ -204,6 +205,55 @@ Measured locally: an ARCH D (36×24 in) page renders in ~0.8 s and tiles in
 a stale cache). Delete the previous assetKey folder after a successful
 re-render.
 
+### 5.1 Download PDF (`src/server/export.ts`, `src/server/render/export-worker.ts`)
+
+The chosen pages as one PDF. The server works out what goes in — live pages
+in `comparePages` order (whatever order `pageIds` came in), live circles of the
+chosen colours in `num` order, and live, non-blank comments, oldest first —
+and lays each page's notes out as HTML (`notesHtml`); a worker process of its
+own (`export-worker.ts`, bundled as `dist/server/export-worker.js`, forked
+like the render worker; the job goes in a JSON file under `DATA_DIR/tmp`
+because a command line can't hold it) makes the PDF:
+
+- **Each page as uploaded.** A PDF page is grafted from its source
+  (`newGraftMap().graftPage`, each source opened once, read from disk on
+  demand): its vectors and text stay as they were, at the same size and
+  rotation. The source's own annotations (stamps, markups — the app's page
+  images show them) are baked into its drawing first (`bake(true, true)`, in a
+  copy that's never saved), and its `/Group` is copied (graftPage drops both).
+  A PNG/JPG upload becomes a page of its own, upright (EXIF rotation applied
+  with sharp, as the renderer does), at 150 dpi, never bigger than 36 × 24 in.
+  A source that can't be read becomes a page that says so (and, with notes,
+  that its circles are listed on the next page).
+- **The circles on top**, as plain PDF drawing, so they look and print the
+  same in every viewer and can't be edited away by accident. The page's own
+  content becomes a form XObject drawn first (`q /KWEPage Do Q`), so nothing
+  left over in it (an unclosed `cm`) can move the circles, which are drawn in
+  "page as shown" space (`page.getBounds()`, the app's fractions) through
+  `invert(page.getTransform())`. Fill at the colour's opacity (an ExtGState),
+  solid outline 0.18 % of the long side (1–4.5 pt), never smaller than 0.6 % of
+  the long side in radius; biggest first; then every number badge (a black
+  chip with KW gold figures in Helvetica-Bold, 1.4 % of the long side tall,
+  9–36 pt, centred on the circle's top edge and kept on the sheet), so no
+  circle covers a number.
+- **Notes** (`notes`, default on): after each page with circles, US-letter
+  pages laid out by mupdf's HTML engine: the page's name; "Plan · Notes for
+  page 2 of 6 · N circles · N comments"; then per circle its number badge,
+  colour swatch, colour name and what it means in this plan (`legendOf`), its
+  title, and each comment with its date (`timeZone` from the device; UTC,
+  said so, when it's missing or unknown) and "edited" (as in the app), or "No
+  comments". The Kilowatt Events lockup (`lockup-black.png` from the built
+  client, as supplied) sits in the top margin of every notes page.
+- A bookmark per page, page labels ("A-101", "A-101 notes 1"), the plan's
+  name as the PDF's title.
+
+Exports run one at a time (up to three wait; more get 429). The PDF is made
+in full before the reply starts, so a failure is still a plain `{ error }`;
+the file is streamed from `DATA_DIR/tmp` and removed once sent or abandoned.
+The worker is killed after 10 minutes (`exportTimeoutMs`); killed for memory
+→ "too much for one PDF". Measured: 20 ARCH D vector sheets + 8 scans
+(122 MB) in about 1.5 s, ~440 MB at peak.
+
 ## 6. Server details
 
 - Config (env): `PORT` (8080), `DATA_DIR` (`./data`), `APP_PASSWORD` or `APP_PASSWORD_HASH` (scrypt format `scrypt:<salt b64url>:<hash b64url>` from `scripts/hash-password.mjs`), `SESSION_SECRET` (optional: if missing, generate 48 random bytes once and keep them in `DATA_DIR/.session-secret`, mode 600), `NODE_ENV`. In production with no password configured, every API answers 503 `"The app isn't set up yet: no password is configured."` (fail closed). `MAX_UPLOAD_MB` from constants.
@@ -217,7 +267,7 @@ re-render.
 - Static: serve `dist/client` (built SPA). Hashed files under `/assets/` get `Cache-Control: public, max-age=31536000, immutable`; `index.html` gets `no-cache`. Any non-`/api` GET that isn't a file → `index.html` (SPA routes). Security headers on HTML: `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: DENY`, a CSP allowing self only (`default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'`).
 - Logging: one line per request (method, path, status, ms) except asset hits; errors with stack.
 - Graceful shutdown on SIGTERM: stop accepting, let the queue's current worker finish or terminate after 10 s, close the DB.
-- Entry `src/server/index.ts`; worker `src/server/render/worker.ts`. In development the server runs under `tsx` (the worker file is `.ts`); in production both are bundled to `dist/server/index.js` and `dist/server/render-worker.js` (see `scripts/build-server.mjs`) — resolve the worker path accordingly (e.g. `new URL(import.meta.url.endsWith(".ts") ? "./render/worker.ts" : "./render-worker.js", import.meta.url)`).
+- Entry `src/server/index.ts`; worker `src/server/render/worker.ts`. In development the server runs under `tsx` (the worker file is `.ts`); in production they're bundled to `dist/server/index.js`, `dist/server/render-worker.js` and `dist/server/export-worker.js` (see `scripts/build-server.mjs`) — resolve the worker path accordingly (e.g. `new URL(import.meta.url.endsWith(".ts") ? "./render/worker.ts" : "./render-worker.js", import.meta.url)`).
 - `package.json` `start` runs `node --disable-warning=ExperimentalWarning dist/server/index.js`.
 - Export a `createApp(config)` (returns the Hono app + a `close()`), so tests can start the server on a temp DATA_DIR with a random port.
 
@@ -412,8 +462,9 @@ div.ed-body
 
 - **Header**: back link `IconArrowLeft` "Plans" (flushes first). Plan name inline-renamable (`store.renamePlan`). Page switcher: prev/next icon buttons + "Page 2 of 6" + the page label (click opens the left sidebar on Pages). Mode group (`.hdr-group`, segmented): "Move" (`IconHand`) and "Circle" (`IconCircle`; the active mode is black with gold text) — keyboard `V`/`C`. Undo/Redo icon buttons (disabled states). `SaveStatus` tag (tap = `flushNow()`). Help `Menu` (`?`) listing shortcuts with `<kbd>` and gestures for iPad. Below 1100 px labels collapse to icons (with `aria-label`/`title`); below 820 px the header wraps to two rows (DeployMap's narrow header rule).
 - **Left sidebar** (`PageSidebar.tsx`): width 280 px; collapsible to a 56 px rail (page number buttons 1…N with the active one marked, plus an expand button). Collapse state persists in localStorage (`bpn-left-collapsed`). Below 900 px wide it's an overlay drawer (with a scrim) that closes after choosing a page. Tabs at the top (`.evtabs`, the open one with a 4 px gold underline): **Pages** and **Notes** (with counts).
-  - Pages tab: rows with thumbnail (white, contain, ~96×68), label (two lines max), "N circles" meta, active row = soft gold fill (`--accent-soft`) + 6 px gold left bar; status: spinner + "Preparing…" (queued/rendering), "Sharpening…" small note while `preview`, failed → red "Couldn't prepare this page" + Retry (`api.retryPage` then `store.refreshPages()`). Row `Menu` (⋯, always visible on touch): Rename (inline), Move up, Move down, Duplicate page… (disabled for a failed page), Copy circles to another page… (with 2+ pages; disabled while the page has no circles), Delete page….
+  - Pages tab: rows with thumbnail (white, contain, ~96×68), label (two lines max), "N circles" meta, active row = soft gold fill (`--accent-soft`) + 6 px gold left bar; status: spinner + "Preparing…" (queued/rendering), "Sharpening…" small note while `preview`, failed → red "Couldn't prepare this page" + Retry (`api.retryPage` then `store.refreshPages()`). Row `Menu` (⋯, always visible on touch): Rename (inline), Move up, Move down, Duplicate page… (disabled for a failed page), Copy circles to another page… (with 2+ pages; disabled while the page has no circles), Download as PDF…, Delete page….
   - Duplicate page (`DuplicatePageDialog.tsx`): "Name of the copy" (prefilled "A-101 (copy)"; focused with a mouse, not on touch screens) and "What comes along": Just the page / The page and its N circles / The page, its N circles and their M comments (only the choices that differ; everything by default). Duplicate → `store.flushNow()`, `api.duplicatePage` (with the copy's id, picked when the dialog opens, so a retry after a lost reply finishes the same copy), then `store.addDuplicatedPage(res.pages, res.page.id, copies)` — copies of the page's live circles as this device shows them; ONE undo step (undo deletes the copy) — opens the copy and toasts "Duplicated “A-101” as “A-101 (copy)” with 2 circles.". Errors stay in the dialog ("The page wasn't duplicated. …", then a pull so the page list catches up; focus back on the name with a mouse); it can't be dismissed while the request is out, and nothing is made once the editor has closed. On a touch screen the keyboard's "done" key only closes the keyboard. The dialog keeps the page it was opened for and follows its live row; if the page is deleted on the other device, the dialog closes once no try is out ("That page was deleted on another device, so it wasn't duplicated." — or, when an earlier try's copy turned up after all, that its copy is in the page list without circles). The Copy circles and Duplicate page dialogs are cleared when the plan itself goes (not found), so they never come back by themselves. Double-click a label to rename on desktop. Footer: "Add pages" button (`IconUpload`) → file picker (multiple, `UPLOAD_ACCEPT`) → sequential uploads via `uploadFile(file, { planId })` with a `Progress` row per file; each success → `store.mergePages(res.pages)`; errors → toast.
+  - Download PDF (`DownloadPdfDialog.tsx`): from the "Download PDF" button under either tab (every page ticked) or a page's "Download as PDF…" (just that page). Pages (thumbnails, "N circles", Select all / Clear), "Add a notes page after each page with circles" (on), and — only while colours are hidden on this device — "Only the colors shown here" (off); "N pages with N circles.". Download PDF → `store.flushNow()`; if changes are still unsaved, nothing is made ("Some changes on this device haven't reached the server yet…", or sign in again); else `downloadPlanPdf` (XHR: "Making the PDF…", then "Downloading… 42%"). Ready: "Plan.pdf is ready (4.2 MB)." A mouse/trackpad device saves it at once (`saveFile`: an object-URL `<a download>`), with "Download again"; a touch device needs a tap — "Save PDF", and "Share…" where the device can share files (`navigator.share`, for a home-screen app on iPad/iPhone that can't download). Closing the dialog stops the download. Errors stay in the dialog ("The PDF wasn't made. …").
   - Delete page: `confirmDialog` ("Delete page “A-101”?", "Its N circles and N comments go with it. You can undo this right after.") → `store.deletePage` → toast with Undo (`store.restorePage`). If it was the open page, open the nearest remaining page.
   - Notes tab (`NotesList.tsx`): every circle in the plan grouped by page (page order), each row: colour dot, `#num`, title (or the first comment's first line, or "No comments yet" muted), comment count; a filter toggle "This page / All pages"; hovering a row lights that circle (`litId`); clicking a row opens its page, selects the circle and calls `canvas.focusCircle`.
 - **Stage**: if the current page is `queued`/`rendering` → centred placeholder card ("Preparing page… This takes a few seconds for big sheets." with spinner); `failed` → message + Retry; no pages → empty state with "Add pages" (Dropzone). Otherwise `BlueprintCanvas`. Remember each page's last view in memory (Map pageId → View) and pass it as `initialView`; give the canvas `key={page.id}`. Poll `store.refreshPages()` every 1.5 s while any page is queued/rendering/preview.

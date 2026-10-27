@@ -281,5 +281,7 @@ async function render(task: Extract<WorkerTask, { task: "render" }>): Promise<Wo
 const task = JSON.parse(process.argv[2] ?? "null") as WorkerTask;
 // The answer goes out only after the work folder is cleaned up; then the
 // process ends (the server would kill it soon after anyway).
-await post(task.task === "inspect" ? inspect(task) : await render(task));
+await post(
+  task.task === "inspect" ? inspect(task) : task.task === "render" ? await render(task) : { type: "error", code: "failed", message: `not a render task: ${task.task}` },
+);
 process.exit(0);

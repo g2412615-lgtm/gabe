@@ -2,7 +2,10 @@
 // (mouse) and an iPad-sized touch screen (finger): see playwright.config.ts.
 // Each test makes its own event plan, so they don't depend on each other.
 
-import type { Page, TestInfo } from "@playwright/test";
+import fs from "node:fs";
+import type { Download, Page, TestInfo } from "@playwright/test";
+import * as mupdf from "mupdf";
+import { pdfFileName } from "../../src/shared/labels";
 import {
   centreOf,
   dragFromTo,
@@ -747,6 +750,62 @@ test.describe("the editor", () => {
       await expect(chip).toBeHidden();
     }
     void gold;
+  });
+
+  test("download PDF: the pages with their circles and a notes page, changes not yet saved included; one page from its menu", async ({ page }, info) => {
+    const { planId, name } = await freshPlan(page, info, "Download PDF");
+    const ed = editor(page);
+    const closePanel = ed.panel.getByRole("button", { name: "Close the panel" });
+    await addCircleAt(page, info, planId, await sheetPoint(page, 0.3, 0.4));
+    await press(ed.panel.getByRole("button", { name: /^Red/ }), info);
+    // written and downloaded at once: the dialog saves it first
+    await writeComment(page, info, "Two scanners at doors open.");
+
+    const dialog = page.getByRole("dialog", { name: "Download PDF" });
+    /** Download, then the PDF as mupdf reads it. A touch screen gets the file with a second tap (Save PDF). */
+    const fetchPdf = async (fileName: string) => {
+      let download: Download;
+      if (isTouch(info)) {
+        await press(dialog.getByRole("button", { name: "Download PDF" }), info);
+        await expect(dialog.getByRole("status")).toContainText("is ready");
+        [download] = await Promise.all([page.waitForEvent("download"), press(dialog.getByRole("button", { name: "Save PDF" }), info)]);
+      } else {
+        [download] = await Promise.all([page.waitForEvent("download"), press(dialog.getByRole("button", { name: "Download PDF" }), info)]);
+        await expect(dialog.getByRole("status")).toContainText("is ready");
+      }
+      expect(download.suggestedFilename()).toBe(fileName);
+      const bytes = fs.readFileSync((await download.path())!);
+      expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+      return new mupdf.PDFDocument(bytes);
+    };
+    const textOf = (doc: mupdf.PDFDocument, i: number) => doc.loadPage(i).toStructuredText("preserve-whitespace").asText();
+
+    // ── the whole plan, from under the page list ──
+    await press(ed.sidebar.getByRole("button", { name: /Download PDF/ }), info);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("checkbox", { checked: true })).toHaveCount(5); // 4 pages + "notes"
+    await expect(dialog.getByText("4 pages with 1 circle.")).toBeVisible();
+    const all = await fetchPdf(pdfFileName(name));
+    expect(all.countPages()).toBe(5); // A-101, its notes, P-1, C-201, R-1
+    expect(all.loadPage(1).getLabel()).toBe("A-101 notes 1");
+    const notes = textOf(all, 1);
+    expect(notes).toContain(name);
+    expect(notes).toContain("Red");
+    expect(notes).toContain("Two scanners at doors open.");
+    await press(dialog.getByRole("button", { name: "Done" }), info);
+    await expect(dialog).toBeHidden();
+
+    // ── one page, from its ⋯ menu, without notes ──
+    await press(closePanel, info);
+    if (!isTouch(info)) await ed.pageButton("P-1").hover();
+    await press(ed.pageMenu("P-1"), info);
+    await press(page.getByRole("menuitem", { name: "Download as PDF…" }), info);
+    await expect(dialog.getByText("1 page with 0 circles.")).toBeVisible();
+    await press(dialog.getByRole("checkbox", { name: /notes page/ }), info);
+    const one = await fetchPdf(pdfFileName(name, "P-1"));
+    expect(one.countPages()).toBe(1);
+    expect(one.loadPage(0).getLabel()).toBe("P-1");
+    expect(liveCircles(await getPlan(page, planId))).toHaveLength(1); // nothing in the plan changed
   });
 
   test("add pages from a second PDF, delete one page; home shows the counts", async ({ page }, info) => {

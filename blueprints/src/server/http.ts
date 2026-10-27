@@ -24,6 +24,12 @@ export const MSG = {
   serverError: "Something went wrong on the server — try again in a moment.",
 } as const;
 
+/** "Save as" this file name (RFC 6266: a plain ASCII copy for old clients, the real name in UTF-8). */
+export function contentDisposition(fileName: string): string {
+  const ascii = fileName.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
 /** Ids in paths and sync ops: UUIDs (server or client made) and asset keys. */
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export const isId = (v: unknown): v is string => typeof v === "string" && ID_RE.test(v);

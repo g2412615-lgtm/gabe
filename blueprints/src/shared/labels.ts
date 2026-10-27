@@ -49,6 +49,20 @@ export function cleanLegend(v: unknown, max = MAX_LEGEND_CHARS): string | null {
   return cutAt(oneLine, max);
 }
 
+/**
+ * The downloaded PDF's file name: the event plan's name, plus the page's when
+ * it's just one page — "Millrace Spring Fest - A-101.pdf". Characters a file
+ * name can't hold become "-"; never longer than 120 characters before ".pdf".
+ */
+export function pdfFileName(planName: string, pageLabel: string | null = null): string {
+  // eslint-disable-next-line no-control-regex
+  const clean = (v: string) => v.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
+  const plan = clean(planName) || "Event plan";
+  const page = pageLabel === null ? "" : clean(pageLabel);
+  const base = cutAt(page ? `${plan} - ${page}` : plan, 120).replace(/^[.\s]+|[.\s]+$/g, "") || "Event plan";
+  return `${base}.pdf`;
+}
+
 /** What `color` means in `plan` (its default when the plan doesn't say). */
 export function legendOf(plan: Partial<PlanRow> | null | undefined, color: CircleColor): string {
   const v = plan?.[LEGEND_FIELD[color]];

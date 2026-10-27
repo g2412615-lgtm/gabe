@@ -679,6 +679,19 @@ button.cm-only {
 .ps-add.dropzone .dz-text {
   align-items: flex-start;
 }
+/* Download PDF: a quiet full-width button under the list (both tabs) */
+button.ps-download {
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 12px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+button.ps-download svg {
+  flex: none;
+}
 .ps-upload {
   display: flex;
   align-items: flex-end;
@@ -1594,6 +1607,45 @@ button.cp-delete {
 }
 .dp-bring .cc-row:last-child {
   border-bottom: 1px solid var(--border);
+}
+
+/* ── Download PDF dialog (DownloadPdfDialog.tsx; lists as in Copy circles) ── */
+.dl-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dl-opts .cc-check {
+  align-items: flex-start;
+  padding: 4px 0;
+}
+.dl-opts .cc-check input {
+  margin-top: 2px;
+}
+.dl-opts .cc-check small {
+  display: block;
+  margin-top: 1px;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--muted);
+}
+.dl-sum {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.dl-ready p {
+  margin: 0 0 6px;
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  line-height: var(--lh-body);
+  overflow-wrap: anywhere;
+}
+.dl-ready b {
+  color: var(--text);
+}
+.dl-dialog .es-dialog-foot button svg {
+  flex: none;
 }
 
 /* ── Copy circles dialog (CopyCirclesDialog.tsx) ─────────────────────── */

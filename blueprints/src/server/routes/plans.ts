@@ -1,11 +1,14 @@
 // Event plans: list, create-by-upload, read, rename/delete/restore, page
-// polling, adding files and the autosave endpoint.
+// polling, adding files, the autosave endpoint and "Download PDF".
 
+import fs from "node:fs";
+import { Readable } from "node:stream";
 import { Hono } from "hono";
 import { MAX_PLAN_NAME_CHARS } from "../../shared/constants";
 import type { PlanDoc } from "../../shared/types";
 import type { AppDeps } from "../context";
-import { cleanName, HttpError, idParam, isRecord, MSG, readJson } from "../http";
+import { EXPORT_MSG, ExportFailed, exportPlanPdf, parseExportRequest } from "../export";
+import { cleanName, contentDisposition, HttpError, idParam, isRecord, MSG, readJson } from "../http";
 import { circlesOfPlan, commentsOfPlan, getPlan, pagesOfPlan, planSummaries } from "../repo";
 import { applySync, MAX_SYNC_BYTES, MAX_SYNC_OPS } from "../sync";
 import { handleUpload, type UploadContext } from "../uploads";
@@ -110,6 +113,35 @@ export function planRoutes(deps: AppDeps) {
     // Pages (or the plan) may have been deleted or restored: the render queue re-checks what it should work on.
     if (body.ops.some((op) => isRecord(op) && (op.kind === "page" || op.kind === "plan"))) deps.kickRender();
     return c.json(res);
+  });
+
+  // The chosen pages as one PDF, circles drawn on (export.ts). The PDF is made
+  // in full before anything is sent, so a failure is still a plain message.
+  r.post("/plans/:id/export", async (c) => {
+    const plan = livePlan(idParam(c, "id", MSG.planNotFound));
+    const opts = parseExportRequest(await readJson(c, 256 * 1024));
+    let res;
+    try {
+      res = await exportPlanPdf({ db, config }, plan, opts);
+    } catch (e) {
+      if (!(e instanceof ExportFailed)) throw e;
+      config.log.error(`export of plan ${plan.id} failed`, e.message);
+      throw new HttpError(500, EXPORT_MSG.failed);
+    }
+    const file = res.file;
+    const stream = fs.createReadStream(file);
+    // sent (or the download was cancelled): the file goes
+    stream.once("close", () => fs.rm(file, { force: true }, () => {}));
+    return new Response(Readable.toWeb(stream) as ReadableStream, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Length": String(res.bytes),
+        "Content-Disposition": contentDisposition(res.fileName),
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+      },
+    });
   });
 
   return r;

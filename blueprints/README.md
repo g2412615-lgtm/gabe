@@ -8,8 +8,9 @@ Copy circles, with their comments, onto another page of the same event plan
 (a page's ⋯ menu, a circle's panel, or ⌘C / ⌘V), or duplicate a whole page,
 with or without its circles and comments. Name what each colour means in the
 plan (green starts as "General notes"), and show or hide colours to see one
-kind of note at a time. Every change saves by
-itself, even on patchy stadium Wi‑Fi.
+kind of note at a time. Download the pages as a PDF with the circles drawn
+on, and a notes page after each one listing every circle's comments. Every
+change saves by itself, even on patchy stadium Wi‑Fi.
 
 It's a Kilowatt Events tool and uses the Kilowatt Events brand: gold header
 band, black and white, square corners, Montserrat headlines (see
