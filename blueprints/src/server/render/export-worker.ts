@@ -419,6 +419,14 @@ function appendAll(out: mupdf.PDFDocument, doc: mupdf.PDFDocument): number[] {
  * are off by default still off.
  */
 function keepLayers(out: mupdf.PDFDocument, src: mupdf.PDFDocument, map: mupdf.PDFGraftMap) {
+  try {
+    mergeLayers(out, src, map);
+  } catch {
+    /* a broken layer list: the layers show, as they would with none (never a failed export) */
+  }
+}
+
+function mergeLayers(out: mupdf.PDFDocument, src: mupdf.PDFDocument, map: mupdf.PDFGraftMap) {
   // (get() on a missing entry's null object throws: everything is checked first)
   const props = src.getTrailer().get("Root").get("OCProperties");
   if (!props.isDictionary()) return;
@@ -448,7 +456,13 @@ function keepLayers(out: mupdf.PDFDocument, src: mupdf.PDFDocument, map: mupdf.P
   for (let i = 0; i < groups.length; i++) {
     const g = groups.get(i);
     if (!g.isIndirect()) continue;
-    const copy = map.graftObject(g);
+    let copy: mupdf.PDFObject;
+    try {
+      copy = map.graftObject(g);
+    } catch {
+      continue; // a layer the file doesn't really have
+    }
+    if (!copy.resolve().isDictionary()) continue;
     mine.get("OCGs").push(copy);
     if (allOff ? !on.has(g.asIndirect()) : off.has(g.asIndirect())) mine.get("D").get("OFF").push(copy);
   }
@@ -488,10 +502,13 @@ async function exportPdf(task: Extract<WorkerTask, { task: "export" }>): Promise
         continue; // unreadable: those pages get a placeholder
       }
       // Some files point at objects they don't have (a quirk of some
-      // producers; viewers shrug it off, copying a page can't): those pages
-      // are copied from a tidied copy of the file instead.
-      let tidied: mupdf.PDFDocument | null = null;
-      let tidiedMap: mupdf.PDFGraftMap | null = null;
+      // producers; viewers shrug it off, copying a page can't). From the first
+      // page that fails on, this file's pages are copied from a tidied copy of
+      // it instead: the failed copy leaves the graft map half filled (mupdf
+      // maps an object before copying what it points at), so a later page
+      // sharing those objects would come out with them empty.
+      const tidied: { doc: mupdf.PDFDocument | null; map: mupdf.PDFGraftMap | null } = { doc: null, map: null };
+      let failed = false;
       try {
         const map = out.newGraftMap();
         const copyPage = (doc: mupdf.PDFDocument, m: mupdf.PDFGraftMap, i: number) => {
@@ -503,27 +520,40 @@ async function exportPdf(task: Extract<WorkerTask, { task: "export" }>): Promise
           if (!group.isNull()) out.findPage(at).put("Group", m.graftObject(group));
           sheetAt[i] = at;
         };
-        for (const i of list) {
-          try {
-            copyPage(src.doc, map, i);
-          } catch {
+        const tidy = () => {
+          if (!tidied.doc) {
+            const buf = src.doc.saveToBuffer("garbage");
             try {
-              tidied ??= new mupdf.PDFDocument(src.doc.saveToBuffer("garbage"));
-              tidiedMap ??= out.newGraftMap();
-              copyPage(tidied, tidiedMap, i);
-            } catch {
-              /* a broken page: a placeholder */
+              tidied.doc = new mupdf.PDFDocument(buf);
+            } finally {
+              buf.destroy(); // the document keeps what it needs: the file-sized copy goes now, not at some later GC
             }
+          }
+          tidied.map ??= out.newGraftMap();
+          return { doc: tidied.doc, map: tidied.map };
+        };
+        for (const i of list) {
+          if (!failed) {
+            try {
+              copyPage(src.doc, map, i);
+              continue;
+            } catch {
+              failed = true;
+            }
+          }
+          try {
+            const t = tidy();
+            copyPage(t.doc, t.map, i);
+          } catch {
+            /* a broken page: a placeholder */
           }
         }
         keepLayers(out, src.doc, map);
         map.destroy();
-        if (tidied && tidiedMap) {
-          keepLayers(out, tidied, tidiedMap);
-          tidiedMap.destroy();
-        }
+        if (tidied.doc && tidied.map) keepLayers(out, tidied.doc, tidied.map);
       } finally {
-        tidied?.destroy();
+        tidied.map?.destroy();
+        tidied.doc?.destroy();
         src.close();
       }
     }

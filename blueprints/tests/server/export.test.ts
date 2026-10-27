@@ -9,6 +9,7 @@ import * as mupdf from "mupdf";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { notesHtml, richText } from "../../src/server/export";
+import { heavyTurn } from "../../src/server/render/heavy";
 import { pdfFileName } from "../../src/shared/labels";
 import { comparePages } from "../../src/shared/order";
 import type { CircleRow, PageRow, PlanDoc, SyncOp, SyncResponse } from "../../src/shared/types";
@@ -282,6 +283,23 @@ describe("options", () => {
   });
 });
 
+/** A PDF written by hand (objects 1…n in order), for files no PDF library would write. */
+function handMadePdf(objs: string[]): Uint8Array {
+  let pdf = "%PDF-1.7\n";
+  const at: number[] = [];
+  objs.forEach((o, i) => {
+    at.push(pdf.length);
+    pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${at.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
+  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(pdf);
+}
+/** The F1 font a copied page's own drawing uses (in the form the export wraps it in). */
+const fontOf = (doc: mupdf.PDFDocument, i: number) => doc.findPage(i).get("Resources").get("XObject").get("KWEPage").get("Resources").get("Font").get("F1").resolve();
+const stream = (content: string) => `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+
 /** A plan of its own from `bytes`; its pages once they're listed. */
 async function planFrom(bytes: Uint8Array, filename: string, type = "application/pdf") {
   const up = await c.upload(bytes, { filename, type });
@@ -316,33 +334,54 @@ describe("awkward files", () => {
     expect(findColour(doc, 0, GREEN, 20)).not.toBeNull();
   });
 
-  it("a file that points at objects it doesn't have still comes out as its page, circles on", async () => {
-    // a font whose descriptor is missing (object 99 of a 6-object file): viewers shrug, copying a page can't
-    const objs = [
+  it("a file that points at objects it doesn't have still comes out as its pages, circles on — all of them", async () => {
+    // three sheets sharing a font whose descriptor is missing (object 99 of a small file): viewers shrug, copying a page can't
+    const sheet = (n: number) => `BT /F1 36 Tf 72 600 Td (Dangling sheet ${n}) Tj ET`;
+    const pdf = handMadePdf([
       "<< /Type /Catalog /Pages 2 0 R >>",
-      "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
-      "",
+      "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 6 0 R /Contents 8 0 R >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 6 0 R /Contents 9 0 R >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 6 0 R /Contents 10 0 R >>",
+      "<< /Font << /F1 7 0 R >> >>",
       "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FontDescriptor 99 0 R >>",
-    ];
-    const text = "BT /F1 36 Tf 72 600 Td (Dangling sheet) Tj ET";
-    objs[3] = `<< /Length ${text.length} >>\nstream\n${text}\nendstream`;
-    let pdf = "%PDF-1.7\n";
-    const at: number[] = [];
-    objs.forEach((o, i) => {
-      at.push(pdf.length);
-      pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
-    });
-    const xref = pdf.length;
-    pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${at.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
-    pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
-    const plan = await planFrom(new TextEncoder().encode(pdf), "dangling.pdf");
+      stream(sheet(1)),
+      stream(sheet(2)),
+      stream(sheet(3)),
+    ]);
+    const plan = await planFrom(pdf, "dangling.pdf");
     await sync([circle(plan.pages[0].id, { key: "dangling", x: 0.5, y: 0.3, r: 0.05, color: "red" })], plan.id);
+    const ids = plan.pages.map((p) => p.id);
+    const { res, bytes } = await exportPdf({ pageIds: ids, notes: false }, {}, plan.id);
+    expect(res.status).toBe(200);
+    const doc = open(bytes);
+    expect(doc.countPages()).toBe(3);
+    for (const n of [1, 2, 3]) expect(textOf(doc, n - 1)).toContain(`Dangling sheet ${n}`);
+    // every page has its font (mupdf reads the text without it; other viewers draw nothing)
+    for (let i = 0; i < 3; i++) expect(fontOf(doc, i).isDictionary()).toBe(true);
+    expect(findColour(doc, 0, RED)).not.toBeNull();
+    // the same sheet twice (a duplicated page) after the first failed copy: both whole
+    const dup = await c.post<{ page: PageRow }>(`/api/pages/${ids[0]}/duplicate`, {});
+    expect(dup.status).toBe(201);
+    const twice = open((await exportPdf({ pageIds: [ids[0], dup.json.page.id], notes: false }, {}, plan.id)).bytes);
+    for (let i = 0; i < 2; i++) expect(fontOf(twice, i).isDictionary()).toBe(true);
+  });
+
+  it("a layer list that points at a layer the file doesn't have doesn't sink the PDF", async () => {
+    const pdf = handMadePdf([
+      "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R 6 0 R 99 0 R] /D << /OFF [5 0 R] >> >> >>",
+      "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Properties << /H 5 0 R /S 6 0 R >> >> /Contents 4 0 R >>",
+      stream("/OC /H BDC 0.76 0.12 0.12 rg 100 400 150 150 re f EMC\n/OC /S BDC 0.12 0.48 0.23 rg 350 400 150 150 re f EMC"),
+      "<< /Type /OCG /Name (Hidden) >>",
+      "<< /Type /OCG /Name (Shown) >>",
+    ]);
+    const plan = await planFrom(pdf, "broken-layers.pdf");
     const { res, bytes } = await exportPdf({ pageIds: [plan.pages[0].id], notes: false }, {}, plan.id);
     expect(res.status).toBe(200);
     const doc = open(bytes);
-    expect(textOf(doc, 0)).toContain("Dangling sheet");
-    expect(findColour(doc, 0, RED)).not.toBeNull();
+    expect(findColour(doc, 0, RED, 20)).toBeNull();
+    expect(findColour(doc, 0, GREEN, 20)).not.toBeNull();
   });
 
   it("a huge photo is scaled to the page's needs (36 in at 150 dpi) instead of held whole", async () => {
@@ -387,6 +426,32 @@ describe("awkward files", () => {
     expect(textOf(doc, 1)).toContain("Comment 1\n");
   });
 
+  it("exports given up while waiting their turn don't keep their place in line", async () => {
+    const done = await heavyTurn(); // a page render (say) holds the turn
+    try {
+      const giveUps = Array.from({ length: 3 }, () => {
+        const ctrl = new AbortController();
+        const req = fetch(`${server.url}/api/plans/${planId}/export`, {
+          method: "POST",
+          headers: { cookie: c.cookie, "content-type": "application/json" },
+          body: JSON.stringify({ pageIds: [pages[1].id], notes: false }),
+          signal: ctrl.signal,
+        }).catch(() => null);
+        return { ctrl, req };
+      });
+      await new Promise((r) => setTimeout(r, 300));
+      for (const g of giveUps) g.ctrl.abort();
+      await Promise.all(giveUps.map((g) => g.req));
+      await new Promise((r) => setTimeout(r, 100));
+      const fourth = exportPdf({ pageIds: [pages[1].id], notes: false });
+      await new Promise((r) => setTimeout(r, 300));
+      done();
+      expect((await fourth).res.status).toBe(200);
+    } finally {
+      done();
+    }
+  });
+
   it("an export the device gives up on stops, and leaves nothing behind", async () => {
     const ctrl = new AbortController();
     const going = fetch(`${server.url}/api/plans/${planId}/export`, {
@@ -413,6 +478,10 @@ describe("richText", () => {
     expect(richText("★ → x")).toBe('<span class="f-sym">★</span> <span class="f-sym">→</span> x');
     expect(richText("כניסה ראשית: A")).toBe('<span class="f-he">כניסה ראשית</span>: A');
     expect(richText("👨‍👩‍👧 🇺🇸")).toBe('<span class="f-emo">👨‍👩‍👧</span> <span class="f-emo">🇺🇸</span>');
+    // a script's punctuation and marks stay with it
+    expect(richText("مرحبا، كيف حالك؟")).toBe('<span class="f-ar">مرحبا، كيف حالك؟</span>');
+    expect(richText("مُحَمَّد")).toBe('<span class="f-ar">مُحَمَّد</span>');
+    expect(richText("यह ठीक है।")).toBe('<span class="f-deva">यह ठीक है।</span>');
   });
 });
 

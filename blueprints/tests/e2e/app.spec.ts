@@ -793,7 +793,9 @@ test.describe("the editor", () => {
     expect(notes).toContain("Red");
     expect(notes).toContain("Two scanners at doors open.");
     // a computer has the file already, so Done is the button to press; on a touch screen it's Save PDF (Done is the quiet one)
-    await expect(dialog.getByRole("button", { name: isTouch(info) ? "Save PDF" : "Done" })).toHaveClass(/\bprimary\b/);
+    const next = dialog.getByRole("button", { name: isTouch(info) ? "Save PDF" : "Done" });
+    await expect(next).toHaveClass(/\bprimary\b/);
+    await expect(next).toBeFocused();
     await press(dialog.getByRole("button", { name: "Done" }), info);
     await expect(dialog).toBeHidden();
 
@@ -808,6 +810,37 @@ test.describe("the editor", () => {
     expect(one.countPages()).toBe(1);
     expect(one.loadPage(0).getLabel()).toBe("P-1");
     await press(dialog.getByRole("button", { name: "Done" }), info);
+
+    // ── the server can't make it: the dialog says so, and (keyboard) Download PDF has focus again to retry ──
+    await page.route("**/api/plans/*/export", (route) =>
+      route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "The PDF couldn't be made. Try again; if it keeps failing, choose fewer pages." }) }),
+    );
+    await press(ed.sidebar.getByRole("button", { name: /Download PDF/ }), info);
+    await press(dialog.getByRole("button", { name: "Download PDF" }), info);
+    await expect(dialog.getByRole("alert")).toContainText("The PDF wasn't made. The PDF couldn't be made.");
+    if (!isTouch(info)) await expect(dialog.getByRole("button", { name: "Download PDF" })).toBeFocused();
+    await page.unroute("**/api/plans/*/export");
+
+    // ── where the device can share files (an iPad's share sheet: Save to Files, Mail, AirDrop), Share… is offered ──
+    await page.evaluate(() => {
+      const w = window as unknown as { shared?: string[] };
+      w.shared = [];
+      Object.assign(navigator, {
+        canShare: (d: { files?: File[] }) => Boolean(d.files?.length),
+        share: async (d: { files: File[] }) => void w.shared!.push(`${d.files[0].name} ${d.files[0].type} ${d.files[0].size > 1000}`),
+      });
+    });
+    await press(dialog.getByRole("button", { name: "Download PDF" }), info);
+    const shareBtn = dialog.getByRole("button", { name: "Share…" });
+    await expect(shareBtn).toBeVisible();
+    if (isTouch(info)) {
+      await expect(shareBtn).toHaveClass(/\bprimary\b/);
+      await expect(shareBtn).toBeFocused();
+    }
+    await press(shareBtn, info);
+    expect(await page.evaluate(() => (window as unknown as { shared: string[] }).shared)).toEqual([`${pdfFileName(name)} application/pdf true`]);
+    await press(dialog.getByRole("button", { name: "Done" }), info);
+    await expect(dialog).toBeHidden();
 
     // ── closed while it's still saving the latest change: no PDF is made ──
     let exports = 0;

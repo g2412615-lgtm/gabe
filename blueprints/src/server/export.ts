@@ -121,10 +121,12 @@ const RUNS = new RegExp(
     // emoji: what Unicode calls emoji, beyond Latin-1 (digits, # and © are "emoji" too, and the usual fonts have them)
     String.raw`(?<emo>(?![\x00-\xFF])\p{Emoji}(?:\uFE0F|\u20E3|[\u{1F3FB}-\u{1F3FF}]|\p{Regional_Indicator}|\u200D(?![\x00-\xFF])\p{Emoji}\uFE0F?)*)`,
     String.raw`(?<sym>[\u2190-\u21FF\u2300-\u23FF\u2460-\u27BF\u2900-\u297F\u2B00-\u2BFF]+)`,
-    String.raw`(?<he>\p{Script=Hebrew}(?:[\p{Script=Hebrew} ]*\p{Script=Hebrew})?)`,
-    String.raw`(?<ar>\p{Script=Arabic}(?:[\p{Script=Arabic} ]*\p{Script=Arabic})?)`,
-    String.raw`(?<deva>\p{Script=Devanagari}(?:[\p{Script=Devanagari} ]*\p{Script=Devanagari})?)`,
-    String.raw`(?<thai>\p{Script=Thai}(?:[\p{Script=Thai} ]*\p{Script=Thai})?)`,
+    // a script's run takes its punctuation and marks too (Script_Extensions: the Arabic comma, the danda,
+    // vowel signs) and the joiners inside words, so words stay joined and nothing falls back to a font without them
+    String.raw`(?<he>\p{scx=Hebrew}(?:[\p{scx=Hebrew} \u200C\u200D]*\p{scx=Hebrew})?)`,
+    String.raw`(?<ar>\p{scx=Arabic}(?:[\p{scx=Arabic} \u200C\u200D]*\p{scx=Arabic})?)`,
+    String.raw`(?<deva>\p{scx=Devanagari}(?:[\p{scx=Devanagari} \u200C\u200D]*\p{scx=Devanagari})?)`,
+    String.raw`(?<thai>\p{scx=Thai}(?:[\p{scx=Thai} \u200C\u200D]*\p{scx=Thai})?)`,
   ].join("|"),
   "gu",
 );
@@ -240,20 +242,42 @@ export class ExportCancelled extends Error {}
 export async function exportPlanPdf(deps: ExportDeps, plan: PlanRow, opts: ExportOptions, signal?: AbortSignal): Promise<ExportResult> {
   // checked before waiting: a mistake is reported at once
   const job = buildJob(deps, plan, opts);
+  if (signal?.aborted) throw new ExportCancelled();
   if (waiting >= MAX_WAITING) throw new HttpError(429, EXPORT_MSG.busy);
-  waiting++;
-  let done: () => void;
+  const done = await waitForTurn(signal);
   try {
-    done = await heavyTurn();
-  } finally {
-    waiting--;
-  }
-  try {
-    if (signal?.aborted) throw new ExportCancelled();
     return await run(deps, job.job, job.fileName, signal);
   } finally {
     done();
   }
+}
+
+/**
+ * Our turn (heavy.ts), counted among the waiting until it comes. Given up the
+ * moment the device goes away: no longer counted, and the turn, once it
+ * comes, passed straight on.
+ */
+function waitForTurn(signal?: AbortSignal): Promise<() => void> {
+  const turn = heavyTurn();
+  waiting++;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const giveUp = () => {
+      if (settled) return;
+      settled = true;
+      waiting--;
+      void turn.then((done) => done());
+      reject(new ExportCancelled());
+    };
+    signal?.addEventListener("abort", giveUp, { once: true });
+    void turn.then((done) => {
+      signal?.removeEventListener("abort", giveUp);
+      if (settled) return;
+      settled = true;
+      waiting--;
+      resolve(done);
+    });
+  });
 }
 
 function buildJob({ db, config }: ExportDeps, plan: PlanRow, opts: ExportOptions): { job: ExportJob; fileName: string } {

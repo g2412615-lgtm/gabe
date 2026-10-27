@@ -223,9 +223,14 @@ because a command line can't hold it) makes the PDF:
   copy that's never saved), and its `/Group` is copied (graftPage drops both).
   Layers (optional content) the source hides by default stay hidden: its
   `/OCProperties` layers join the export's, those off in its default config
-  (`/OFF`, or `/BaseState /OFF` minus `/ON`) still off. A page that can't be
-  copied because the file points at objects it doesn't have is copied from a
-  tidied copy of the file (`saveToBuffer("garbage")`, in memory) instead.
+  (`/OFF`, or `/BaseState /OFF` minus `/ON`) still off; a layer list that
+  points at layers the file doesn't have loses just those, and a broken one
+  never fails the export. When a page can't be copied because the file points
+  at objects it doesn't have, that page and every later page of the file
+  (repeats too) are copied from a tidied copy of it (`saveToBuffer("garbage")`,
+  in memory, its buffer freed at once) instead — the failed copy leaves the
+  graft map half filled, so a later page sharing those objects (a font) would
+  come out without them.
   A PNG/JPG upload becomes a page of its own, upright (EXIF rotation applied
   with sharp, as the renderer does), at 150 dpi, never bigger than 36 × 24 in;
   an image with more than 5400 px on its long side (or turned) is scaled down
@@ -253,7 +258,8 @@ because a command line can't hold it) makes the PDF:
   comments. The Kilowatt Events lockup (`lockup-black.png` from the built
   client, as supplied) sits in the top margin of every notes page. mupdf's
   built-in fonts cover Latin, Greek, Cyrillic and CJK; what they lack is put
-  in fonts of its own by `richText` (spans with classes the worker's
+  in fonts of its own by `richText` (runs by `Script_Extensions`, so a
+  script's punctuation and vowel marks go with it; spans with classes the worker's
   `installLoadFontFunction` answers from `src/server/render/fonts`, copied to
   `dist/server/fonts` by the build: Noto Emoji — monochrome — Noto Sans
   Symbols 2, Hebrew, Arabic, Devanagari, Thai; OFL), subset to what's used.
@@ -268,8 +274,9 @@ exports wait; more get 429. The PDF is made in full before the reply starts,
 so a failure is still a plain `{ error }`; the file is streamed from
 `DATA_DIR/tmp` and removed once sent or abandoned. The request's abort signal
 (read first in the handler; Hono reports a dropped connection only from then
-on) gives up a waiting export's turn, stops a running worker, and stops the
-stream: the file goes either way. The PDF is saved with `garbage,compress`, and
+on) gives up a waiting export's turn at once (no longer counted among the
+waiting; the turn, when it comes, is passed straight on), stops a running
+worker, and stops the stream: the file goes either way. The PDF is saved with `garbage,compress`, and
 a page whose content was several streams (any page with markups, once they're
 baked in) is joined into one form once per sheet, so nothing is stored twice.
 The worker is killed after 10 minutes (`exportTimeoutMs`); killed for memory
@@ -486,7 +493,7 @@ div.ed-body
 - **Left sidebar** (`PageSidebar.tsx`): width 280 px; collapsible to a 56 px rail (page number buttons 1…N with the active one marked, plus an expand button). Collapse state persists in localStorage (`bpn-left-collapsed`). Below 900 px wide it's an overlay drawer (with a scrim) that closes after choosing a page. Tabs at the top (`.evtabs`, the open one with a 4 px gold underline): **Pages** and **Notes** (with counts).
   - Pages tab: rows with thumbnail (white, contain, ~96×68), label (two lines max), "N circles" meta, active row = soft gold fill (`--accent-soft`) + 6 px gold left bar; status: spinner + "Preparing…" (queued/rendering), "Sharpening…" small note while `preview`, failed → red "Couldn't prepare this page" + Retry (`api.retryPage` then `store.refreshPages()`). Row `Menu` (⋯, always visible on touch): Rename (inline), Move up, Move down, Duplicate page… (disabled for a failed page), Copy circles to another page… (with 2+ pages; disabled while the page has no circles), Download as PDF…, Delete page….
   - Duplicate page (`DuplicatePageDialog.tsx`): "Name of the copy" (prefilled "A-101 (copy)"; focused with a mouse, not on touch screens) and "What comes along": Just the page / The page and its N circles / The page, its N circles and their M comments (only the choices that differ; everything by default). Duplicate → `store.flushNow()`, `api.duplicatePage` (with the copy's id, picked when the dialog opens, so a retry after a lost reply finishes the same copy), then `store.addDuplicatedPage(res.pages, res.page.id, copies)` — copies of the page's live circles as this device shows them; ONE undo step (undo deletes the copy) — opens the copy and toasts "Duplicated “A-101” as “A-101 (copy)” with 2 circles.". Errors stay in the dialog ("The page wasn't duplicated. …", then a pull so the page list catches up; focus back on the name with a mouse); it can't be dismissed while the request is out, and nothing is made once the editor has closed. On a touch screen the keyboard's "done" key only closes the keyboard. The dialog keeps the page it was opened for and follows its live row; if the page is deleted on the other device, the dialog closes once no try is out ("That page was deleted on another device, so it wasn't duplicated." — or, when an earlier try's copy turned up after all, that its copy is in the page list without circles). The Copy circles and Duplicate page dialogs are cleared when the plan itself goes (not found), so they never come back by themselves. Double-click a label to rename on desktop. Footer: "Add pages" button (`IconUpload`) → file picker (multiple, `UPLOAD_ACCEPT`) → sequential uploads via `uploadFile(file, { planId })` with a `Progress` row per file; each success → `store.mergePages(res.pages)`; errors → toast.
-  - Download PDF (`DownloadPdfDialog.tsx`): from the "Download PDF" button under either tab (every page ticked) or a page's "Download as PDF…" (just that page). Pages (thumbnails, "N circles", Select all / Clear), "Add a notes page after each page with circles" (on), and — only while colours are hidden on this device — "Only the colors shown here" (off); "N pages with N circles.". Download PDF → `store.flushNow()`; if changes are still unsaved, nothing is made ("Some changes on this device haven't reached the server yet…", or sign in again); else `downloadPlanPdf` (XHR: "Making the PDF…", then "Downloading… 42%"). Ready: "Plan.pdf is ready (4.2 MB)." A mouse/trackpad device saves it at once (`saveFile`: an object-URL `<a download>`), with "Download again" and Done (primary, focused); a touch device needs a tap — "Save PDF", and "Share…" where the device can share files (`navigator.share`, for a home-screen app on iPad/iPhone that can't download), that button primary and focused, Done the quiet one. Closing the dialog stops everything under way, including a download about to start once the save finishes. Errors stay in the dialog ("The PDF wasn't made. …"), with focus back on Download PDF (keyboard).
+  - Download PDF (`DownloadPdfDialog.tsx`): from the "Download PDF" button under either tab (every page ticked) or a page's "Download as PDF…" (just that page). Pages (thumbnails, "N circles", Select all / Clear), "Add a notes page after each page with circles" (on), and — only while colours are hidden on this device — "Only the colors shown here" (off); "N pages with N circles.". Download PDF → `store.flushNow()`; if changes are still unsaved, nothing is made ("Some changes on this device haven't reached the server yet…", or sign in again); else `downloadPlanPdf` (XHR: "Making the PDF…", then "Downloading… 42%"). Ready: "Plan.pdf is ready (4.2 MB)." A mouse/trackpad device saves it at once (`saveFile`: an object-URL `<a download>`), with "Download again" and Done (primary, focused); a touch device needs a tap — "Save PDF", and "Share…" where the device can share files (`navigator.share`, for a home-screen app on iPad/iPhone that can't download), that button primary and focused, Done the quiet one. Closing the dialog stops everything under way, including a download about to start once the save finishes. Errors stay in the dialog ("The PDF wasn't made. …"), with focus back on Download PDF (keyboard). Focus moves in an effect after React's commit, once the step it's for is on screen (never on a still-disabled or not-yet-shown button; an earlier step's late effect can't use it up).
   - Delete page: `confirmDialog` ("Delete page “A-101”?", "Its N circles and N comments go with it. You can undo this right after.") → `store.deletePage` → toast with Undo (`store.restorePage`). If it was the open page, open the nearest remaining page.
   - Notes tab (`NotesList.tsx`): every circle in the plan grouped by page (page order), each row: colour dot, `#num`, title (or the first comment's first line, or "No comments yet" muted), comment count; a filter toggle "This page / All pages"; hovering a row lights that circle (`litId`); clicking a row opens its page, selects the circle and calls `canvas.focusCircle`.
 - **Stage**: if the current page is `queued`/`rendering` → centred placeholder card ("Preparing page… This takes a few seconds for big sheets." with spinner); `failed` → message + Retry; no pages → empty state with "Add pages" (Dropzone). Otherwise `BlueprintCanvas`. Remember each page's last view in memory (Map pageId → View) and pass it as `initialView`; give the canvas `key={page.id}`. Poll `store.refreshPages()` every 1.5 s while any page is queued/rendering/preview.

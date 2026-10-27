@@ -70,6 +70,18 @@ export default function DownloadPdfDialog({ store, pageIds, hiddenColors, onClos
   );
   const alive = () => open.current && editorAlive();
 
+  // Where focus goes once the screen shows the new step (after React's commit:
+  // the button pressed was disabled or is gone, and the next one may not be
+  // there yet). Keyboard and screen readers land on what to press next.
+  // (Each target waits for its own step: an earlier step's effect may still be due when it's set.)
+  const focusNext = useRef<"save" | "submit" | null>(null);
+  useEffect(() => {
+    const target = focusNext.current === "save" && phase.step === "ready" ? saveRef : focusNext.current === "submit" && phase.step === "choose" ? submitRef : null;
+    if (!target) return;
+    focusNext.current = null;
+    target.current?.focus();
+  }, [phase, error]);
+
   const chosen = pages.filter((p) => picked.has(p.id));
   const colors = onlyShown ? CIRCLE_COLOR_ORDER.filter((c) => !hiddenColors.has(c)) : CIRCLE_COLOR_ORDER;
   const countCircles = (pageId: string) => (circlesByPage.get(pageId) ?? NONE).filter((c) => colors.includes(c.color)).length;
@@ -93,8 +105,8 @@ export default function DownloadPdfDialog({ store, pageIds, hiddenColors, onClos
     await store.flushNow();
     if (!alive()) return;
     if (store.hasUnsaved()) {
-      setPhase({ step: "choose" });
       refocus();
+      setPhase({ step: "choose" });
       const st = store.getState().save.state;
       setError(
         st === "signedOut"
@@ -122,24 +134,25 @@ export default function DownloadPdfDialog({ store, pageIds, hiddenColors, onClos
       const blob = await req.promise;
       if (!alive() || request.current !== req) return;
       request.current = null;
+      // the button that was pressed is gone: the one to press next takes focus (Enter, a screen reader).
+      // Said first: the download's click below can make React show the new step at once.
+      focusNext.current = "save";
       setPhase({ step: "ready", blob, name });
       // a computer takes the download now; a touch device waits for a tap (see Save PDF)
       if (!coarse) saveFile(blob, name);
-      // the button that was pressed is gone: the one to press next takes focus (Enter, a screen reader)
-      requestAnimationFrame(() => saveRef.current?.focus());
     } catch (err) {
       if (!alive() || request.current !== req) return;
       request.current = null;
+      refocus();
       setPhase({ step: "choose" });
       const why = err instanceof ApiError && err.message ? err.message : "Check the connection and try again.";
       setError(`The PDF wasn't made. ${why}`);
-      refocus();
     }
   };
 
-  /** Focus went to the page while Download was disabled: back to it, so Enter tries again (with a keyboard). */
+  /** Focus went to the page while Download was disabled: back to it, so Enter tries again (with a keyboard). Call before the state changes. */
   const refocus = () => {
-    if (!coarse) requestAnimationFrame(() => submitRef.current?.focus());
+    if (!coarse) focusNext.current = "submit";
   };
 
   const share = phase.step === "ready" ? shareableFile(phase.blob, phase.name) : null;
